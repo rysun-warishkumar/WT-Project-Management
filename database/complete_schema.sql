@@ -10,33 +10,22 @@
 -- 5. All migrations and updates
 -- =====================================================
 
--- Create database
-CREATE DATABASE IF NOT EXISTS client_management;
-USE client_management;
+-- =====================================================
+-- DATABASE SETUP
+-- =====================================================
+-- IMPORTANT: Update the database name on line 15 to match your Hostinger database name
+-- Example: USE u524544702_clientdb;
+-- Example: USE u524544702_clientdb;
+-- =====================================================
+
+-- Use your database (UPDATE THIS with your actual Hostinger database name)
+USE u524544702_clientdb;
 
 -- =====================================================
 -- SECTION 1: CORE CLIENT MANAGEMENT TABLES
 -- =====================================================
 
--- Users table (Admin users)
-CREATE TABLE IF NOT EXISTS users (
-    id INT PRIMARY KEY AUTO_INCREMENT,
-    username VARCHAR(50) UNIQUE NOT NULL,
-    email VARCHAR(100) UNIQUE NOT NULL,
-    password VARCHAR(255) NOT NULL,
-    full_name VARCHAR(100) NOT NULL,
-    role ENUM('admin', 'po', 'manager', 'accountant', 'client', 'viewer') DEFAULT 'viewer',
-    client_id INT NULL,
-    avatar VARCHAR(255),
-    is_active BOOLEAN DEFAULT TRUE,
-    last_login DATETIME,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE SET NULL,
-    INDEX idx_users_client_id (client_id),
-    INDEX idx_users_email (email)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
+-- IMPORTANT: Create clients table FIRST (before users) to avoid foreign key constraint errors
 -- Clients table
 CREATE TABLE IF NOT EXISTS clients (
     id INT PRIMARY KEY AUTO_INCREMENT,
@@ -61,6 +50,26 @@ CREATE TABLE IF NOT EXISTS clients (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     INDEX idx_clients_email (email),
     INDEX idx_clients_status (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Users table (Admin users)
+-- Note: client_id foreign key references clients table created above
+CREATE TABLE IF NOT EXISTS users (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    username VARCHAR(50) UNIQUE NOT NULL,
+    email VARCHAR(100) UNIQUE NOT NULL,
+    password VARCHAR(255) NOT NULL,
+    full_name VARCHAR(100) NOT NULL,
+    role ENUM('admin', 'po', 'manager', 'accountant', 'client', 'viewer') DEFAULT 'viewer',
+    client_id INT NULL,
+    avatar VARCHAR(255),
+    is_active BOOLEAN DEFAULT TRUE,
+    last_login DATETIME,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE SET NULL,
+    INDEX idx_users_client_id (client_id),
+    INDEX idx_users_email (email)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Projects table

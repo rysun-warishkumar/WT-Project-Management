@@ -10,7 +10,14 @@ const dbConfig = {
   port: process.env.DB_PORT || 3306,
   waitForConnections: true,
   connectionLimit: 10,
-  queueLimit: 0
+  queueLimit: 0,
+  // SSL configuration for remote MySQL (Hostinger)
+  // Only enable SSL for remote connections (not localhost)
+  ssl: process.env.DB_HOST && process.env.DB_HOST !== 'localhost' && process.env.DB_HOST !== '127.0.0.1' ? {
+    rejectUnauthorized: false // Set to true if you have proper SSL certificates
+  } : false,
+  // Connection timeout for remote databases
+  connectTimeout: 60000
 };
 
 // Create connection pool

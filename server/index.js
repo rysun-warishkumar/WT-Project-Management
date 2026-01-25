@@ -218,13 +218,32 @@ app.use((err, req, res, next) => {
   });
 });
 
-// 404 handler
-app.use('*', (req, res) => {
-  res.status(404).json({
-    success: false,
-    message: 'Route not found'
+// Serve static files from React app in production (after all API routes)
+if (process.env.NODE_ENV === 'production') {
+  // Serve static files (JS, CSS, images, etc.)
+  app.use(express.static(path.join(__dirname, '../client/build')));
+  
+  // Serve React app for all non-API routes (SPA routing)
+  app.get('*', (req, res) => {
+    // Skip API routes
+    if (req.path.startsWith('/api')) {
+      return res.status(404).json({
+        success: false,
+        message: 'Route not found'
+      });
+    }
+    // Serve React app for all other routes
+    res.sendFile(path.join(__dirname, '../client/build/index.html'));
   });
-});
+} else {
+  // 404 handler for development (API routes only)
+  app.use('*', (req, res) => {
+    res.status(404).json({
+      success: false,
+      message: 'Route not found'
+    });
+  });
+}
 
 // Database connection and server start
 const startServer = async () => {

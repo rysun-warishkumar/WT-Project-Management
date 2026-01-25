@@ -185,6 +185,41 @@ Complete documentation is available in `DOCUMENTATION.md`, including:
 - API documentation
 - Development guidelines
 
+## 🚀 Deployment
+
+### Quick Deployment Guide
+
+For deploying to **Render** with **Hostinger MySQL**, see:
+- **`QUICK_DEPLOY.md`** - Quick deployment checklist
+- **`DEPLOYMENT.md`** - Complete deployment guide
+- **`HOSTINGER_SETUP.md`** - Hostinger MySQL setup instructions
+
+### Generate Production Secrets
+
+```bash
+node scripts/generate-secrets.js
+```
+
+This will generate secure `JWT_SECRET` and `CREDENTIAL_ENCRYPTION_KEY` for production use.
+
+## 🚀 Deployment
+
+### Quick Deployment Guide
+
+For deploying to **Render** with **Hostinger MySQL**, see:
+- **`QUICK_DEPLOY.md`** - Quick deployment checklist
+- **`DEPLOYMENT.md`** - Complete deployment guide
+- **`HOSTINGER_SETUP.md`** - Hostinger MySQL setup instructions
+- **`DEPLOYMENT_SUMMARY.md`** - Deployment overview
+
+### Generate Production Secrets
+
+```bash
+node scripts/generate-secrets.js
+```
+
+This will generate secure `JWT_SECRET` and `CREDENTIAL_ENCRYPTION_KEY` for production use.
+
 ## 🆘 Support
 
 For support and questions, please create an issue in the repository or contact the development team.
