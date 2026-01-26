@@ -50,13 +50,41 @@ const corsAllowedOrigins = (process.env.CORS_ORIGIN || 'http://localhost:3000')
 // Helper function to check if origin is allowed
 const isOriginAllowed = (origin) => {
   if (!origin) return true;
+  
+  // Exact match in allowed origins list
   if (corsAllowedOrigins.includes(origin)) return true;
+  
+  // Development mode - allow localhost
   if (process.env.NODE_ENV !== 'production') {
     return origin === 'http://localhost:3000' ||
            origin === 'http://127.0.0.1:3000' ||
            origin === 'http://localhost:3001' ||
            origin === 'http://127.0.0.1:3001';
   }
+  
+  // Production mode - check if origin matches Render pattern
+  // Allow any Render static site (*.onrender.com) if CORS_ORIGIN is not set or matches pattern
+  if (process.env.NODE_ENV === 'production') {
+    // If CORS_ORIGIN is not set, allow all Render origins (for initial setup)
+    if (corsAllowedOrigins.length === 0 || corsAllowedOrigins[0] === 'http://localhost:3000') {
+      if (origin && origin.includes('.onrender.com')) {
+        console.log(`⚠️  Allowing Render origin (CORS_ORIGIN not configured): ${origin}`);
+        return true;
+      }
+    }
+    
+    // Check if any allowed origin matches the pattern (for partial matches)
+    const originMatches = corsAllowedOrigins.some(allowed => {
+      // Exact match
+      if (allowed === origin) return true;
+      // Pattern match (e.g., if CORS_ORIGIN contains the domain)
+      if (origin.includes(allowed.replace('https://', '').replace('http://', ''))) return true;
+      return false;
+    });
+    
+    if (originMatches) return true;
+  }
+  
   return false;
 };
 
@@ -77,8 +105,11 @@ app.use(
         return callback(null, true);
       }
 
+      // Production mode - provide helpful error message
       console.error(`❌ CORS blocked for origin: ${origin}`);
-      return callback(new Error(`CORS blocked for origin: ${origin}`));
+      console.error(`   Allowed origins: ${corsAllowedOrigins.join(', ') || 'None configured'}`);
+      console.error(`   Please set CORS_ORIGIN environment variable to: ${origin}`);
+      return callback(new Error(`CORS blocked for origin: ${origin}. Please configure CORS_ORIGIN environment variable.`));
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
