@@ -115,6 +115,7 @@ node -e "require('dotenv').config(); const db = require('./server/config/databas
 For detailed instructions, see:
 - `DEPLOYMENT.md` - Complete deployment guide
 - `HOSTINGER_SETUP.md` - Database setup details
+- `ENVIRONMENT_VARIABLES_EXPLAINED.md` - Detailed explanation of all environment variables
 
 ---
 

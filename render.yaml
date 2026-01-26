@@ -53,9 +53,8 @@ services:
         sync: false  # Optional
 
   # Frontend Static Site
-  - type: web
+  - type: static
     name: client-management-frontend
-    env: static
     buildCommand: cd client && npm install && npm run build
     staticPublishPath: ./client/build
     envVars:

@@ -218,32 +218,23 @@ app.use((err, req, res, next) => {
   });
 });
 
-// Serve static files from React app in production (after all API routes)
-if (process.env.NODE_ENV === 'production') {
-  // Serve static files (JS, CSS, images, etc.)
-  app.use(express.static(path.join(__dirname, '../client/build')));
-  
-  // Serve React app for all non-API routes (SPA routing)
-  app.get('*', (req, res) => {
-    // Skip API routes
-    if (req.path.startsWith('/api')) {
-      return res.status(404).json({
-        success: false,
-        message: 'Route not found'
-      });
-    }
-    // Serve React app for all other routes
-    res.sendFile(path.join(__dirname, '../client/build/index.html'));
-  });
-} else {
-  // 404 handler for development (API routes only)
-  app.use('*', (req, res) => {
-    res.status(404).json({
+// 404 handler for API routes
+// Note: Frontend is deployed separately as a Static Site on Render
+// So we only handle API routes here, not frontend routes
+app.use('*', (req, res) => {
+  // Only handle API routes
+  if (req.path.startsWith('/api')) {
+    return res.status(404).json({
       success: false,
-      message: 'Route not found'
+      message: 'API route not found'
     });
+  }
+  // For non-API routes, return 404 (frontend should handle these)
+  res.status(404).json({
+    success: false,
+    message: 'Route not found. This is the API server. Please use the frontend URL.'
   });
-}
+});
 
 // Database connection and server start
 const startServer = async () => {
