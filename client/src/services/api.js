@@ -274,7 +274,8 @@ export const pmAPI = {
 export const settingsAPI = {
   getSettings: () => api.get('/settings'),
   updateSmtpSettings: (data) => api.put('/settings/smtp', data),
-  testSmtpConnection: (data) => api.post('/settings/smtp/test', data),
+  // SMTP test needs longer timeout (45 seconds)
+  testSmtpConnection: (data) => api.post('/settings/smtp/test', data, { timeout: 45000 }),
 };
 
 export default api;

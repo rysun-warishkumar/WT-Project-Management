@@ -42,6 +42,7 @@ CREATE TABLE IF NOT EXISTS workspaces (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Workspace members table
+-- Create table first without foreign keys (to avoid dependency issues)
 CREATE TABLE IF NOT EXISTS workspace_members (
     id INT PRIMARY KEY AUTO_INCREMENT,
     workspace_id INT NOT NULL,
@@ -53,14 +54,151 @@ CREATE TABLE IF NOT EXISTS workspace_members (
     status ENUM('pending', 'active', 'inactive') DEFAULT 'active',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE,
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-    FOREIGN KEY (invited_by) REFERENCES users(id) ON DELETE SET NULL,
     UNIQUE KEY unique_workspace_user (workspace_id, user_id),
     INDEX idx_workspace_members_workspace (workspace_id),
     INDEX idx_workspace_members_user (user_id),
     INDEX idx_workspace_members_status (status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Add foreign keys separately (after table creation)
+-- This avoids issues with phpMyAdmin and ensures tables exist first
+
+-- =====================================================
+-- Ensure users table has PRIMARY KEY on id column
+-- This is required for foreign key constraints
+-- =====================================================
+
+-- Check if users table exists
+SET @table_exists = (
+    SELECT COUNT(*) 
+    FROM information_schema.TABLES 
+    WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'users'
+);
+
+-- Check if id column exists in users table
+SET @id_col_exists = (
+    SELECT COUNT(*) 
+    FROM information_schema.COLUMNS 
+    WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'users'
+    AND COLUMN_NAME = 'id'
+);
+
+-- Check if users table has PRIMARY KEY on id
+SET @pk_exists = (
+    SELECT COUNT(*) 
+    FROM information_schema.TABLE_CONSTRAINTS tc
+    JOIN information_schema.KEY_COLUMN_USAGE kcu 
+        ON tc.CONSTRAINT_NAME = kcu.CONSTRAINT_NAME
+        AND tc.TABLE_SCHEMA = kcu.TABLE_SCHEMA
+    WHERE tc.CONSTRAINT_SCHEMA = DATABASE()
+    AND tc.TABLE_NAME = 'users'
+    AND tc.CONSTRAINT_TYPE = 'PRIMARY KEY'
+    AND kcu.COLUMN_NAME = 'id'
+);
+
+-- If table and id column exist but no primary key, add it
+SET @sql = IF(@table_exists > 0 AND @id_col_exists > 0 AND @pk_exists = 0,
+    'ALTER TABLE users ADD PRIMARY KEY (id)',
+    IF(@pk_exists > 0,
+        'SELECT "Primary key on users.id already exists" AS message',
+        IF(@table_exists = 0,
+            'SELECT "ERROR: users table does not exist" AS message',
+            'SELECT "ERROR: users.id column does not exist" AS message'
+        )
+    )
+);
+
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+-- =====================================================
+-- Now add foreign keys to workspace_members
+-- =====================================================
+
+-- Add foreign key for workspace_id
+SET @fk_exists = (
+    SELECT COUNT(*) 
+    FROM information_schema.TABLE_CONSTRAINTS 
+    WHERE CONSTRAINT_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'workspace_members'
+    AND CONSTRAINT_NAME = 'fk_workspace_members_workspace'
+    AND CONSTRAINT_TYPE = 'FOREIGN KEY'
+);
+
+SET @sql = IF(@fk_exists = 0,
+    'ALTER TABLE workspace_members ADD CONSTRAINT fk_workspace_members_workspace FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE',
+    'SELECT "Foreign key fk_workspace_members_workspace already exists" AS message'
+);
+
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+-- Add foreign key for user_id
+-- First verify that users.id has a primary key/index
+SET @users_pk_exists = (
+    SELECT COUNT(*) 
+    FROM information_schema.TABLE_CONSTRAINTS 
+    WHERE CONSTRAINT_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'users'
+    AND CONSTRAINT_TYPE = 'PRIMARY KEY'
+);
+
+-- Only add foreign key if users table has primary key
+SET @fk_exists = (
+    SELECT COUNT(*) 
+    FROM information_schema.TABLE_CONSTRAINTS 
+    WHERE CONSTRAINT_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'workspace_members'
+    AND CONSTRAINT_NAME = 'fk_workspace_members_user'
+    AND CONSTRAINT_TYPE = 'FOREIGN KEY'
+);
+
+SET @sql = IF(@fk_exists = 0 AND @users_pk_exists > 0,
+    'ALTER TABLE workspace_members ADD CONSTRAINT fk_workspace_members_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE',
+    IF(@fk_exists > 0, 
+        'SELECT "Foreign key fk_workspace_members_user already exists" AS message',
+        'SELECT "ERROR: Cannot add foreign key - users table missing PRIMARY KEY on id column" AS message'
+    )
+);
+
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+-- Add foreign key for invited_by
+-- Verify users table has primary key first
+SET @users_pk_exists = (
+    SELECT COUNT(*) 
+    FROM information_schema.TABLE_CONSTRAINTS 
+    WHERE CONSTRAINT_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'users'
+    AND CONSTRAINT_TYPE = 'PRIMARY KEY'
+);
+
+SET @fk_exists = (
+    SELECT COUNT(*) 
+    FROM information_schema.TABLE_CONSTRAINTS 
+    WHERE CONSTRAINT_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'workspace_members'
+    AND CONSTRAINT_NAME = 'fk_workspace_members_invited_by'
+    AND CONSTRAINT_TYPE = 'FOREIGN KEY'
+);
+
+SET @sql = IF(@fk_exists = 0 AND @users_pk_exists > 0,
+    'ALTER TABLE workspace_members ADD CONSTRAINT fk_workspace_members_invited_by FOREIGN KEY (invited_by) REFERENCES users(id) ON DELETE SET NULL',
+    IF(@fk_exists > 0, 
+        'SELECT "Foreign key fk_workspace_members_invited_by already exists" AS message',
+        'SELECT "ERROR: Cannot add foreign key - users table missing PRIMARY KEY on id column" AS message'
+    )
+);
+
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
 
 -- =====================================================
 -- STEP 2: Modify Users Table
