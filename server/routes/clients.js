@@ -4,12 +4,14 @@ const { authenticateToken, managerAndAdmin, authorizePermission } = require('../
 const { query: dbQuery } = require('../config/database');
 const bcrypt = require('bcryptjs');
 const { sendClientCredentials } = require('../utils/email');
-const { getClientFilter, canAccessClientData } = require('../utils/dataFiltering');
+const { getClientFilter, canAccessClientData, getWorkspaceFilter } = require('../utils/dataFiltering');
+const { workspaceContext } = require('../middleware/workspaceContext');
 
 const router = express.Router();
 
-// Apply authentication to all routes
+// Apply authentication and workspace context to all routes
 router.use(authenticateToken);
+router.use(workspaceContext);
 
 // Validation for client creation/update
 const clientValidation = [
@@ -61,13 +63,21 @@ router.get('/', authorizePermission('clients', 'view'), [
     let selectWhereClause = 'WHERE 1=1';
     const selectWhereParams = [];
 
-    // Add client filter for client role users
+    // Add workspace filter (primary) and client filter (legacy support)
     // For COUNT query - no alias
+    const countWorkspaceFilter = getWorkspaceFilter(req, '', 'workspace_id');
+    countWhereClause += countWorkspaceFilter.whereClause;
+    countWhereParams.push(...countWorkspaceFilter.whereParams);
+    
     const countClientFilter = getClientFilter(req, '', 'id');
     countWhereClause += countClientFilter.whereClause;
     countWhereParams.push(...countClientFilter.whereParams);
 
     // For SELECT query - with alias
+    const selectWorkspaceFilter = getWorkspaceFilter(req, 'c', 'workspace_id');
+    selectWhereClause += selectWorkspaceFilter.whereClause;
+    selectWhereParams.push(...selectWorkspaceFilter.whereParams);
+    
     const selectClientFilter = getClientFilter(req, 'c', 'id');
     selectWhereClause += selectClientFilter.whereClause;
     selectWhereParams.push(...selectClientFilter.whereParams);
@@ -124,9 +134,13 @@ router.get('/', authorizePermission('clients', 'view'), [
        [...selectWhereParams, limit, offset]
      );
 
-    // Get business types for filter
+    // Get business types for filter (with workspace filter)
+    const businessTypesWorkspaceFilter = getWorkspaceFilter(req, '', 'workspace_id');
     const businessTypes = await dbQuery(
-      'SELECT DISTINCT business_type FROM clients WHERE business_type IS NOT NULL AND business_type != ""'
+      `SELECT DISTINCT business_type FROM clients 
+       WHERE business_type IS NOT NULL AND business_type != "" 
+       ${businessTypesWorkspaceFilter.whereClause}`,
+      businessTypesWorkspaceFilter.whereParams
     );
 
     // Set cache control headers to prevent caching
@@ -275,10 +289,26 @@ router.post('/', authorizePermission('clients', 'create'), clientValidation, asy
       notes
     } = req.body;
 
-    // Check if email already exists
+    // Get workspace ID
+    const workspaceId = req.workspaceId || req.workspaceFilter?.value;
+    if (!workspaceId && !req.isSuperAdmin) {
+      return res.status(403).json({
+        success: false,
+        message: 'Workspace context required'
+      });
+    }
+
+    // Check if email already exists (within workspace)
+    const existingClientsWhere = workspaceId 
+      ? 'WHERE email = ? AND workspace_id = ?'
+      : 'WHERE email = ?';
+    const existingClientsParams = workspaceId 
+      ? [email, workspaceId]
+      : [email];
+    
     const existingClients = await dbQuery(
-      'SELECT id FROM clients WHERE email = ?',
-      [email]
+      `SELECT id FROM clients ${existingClientsWhere}`,
+      existingClientsParams
     );
 
     if (existingClients.length > 0) {
@@ -288,17 +318,18 @@ router.post('/', authorizePermission('clients', 'create'), clientValidation, asy
       });
     }
 
-    // Insert new client
+    // Insert new client (with workspace_id)
     const result = await dbQuery(
       `INSERT INTO clients (
         company_name, full_name, email, phone, whatsapp, business_type,
         gst_number, tax_id, address, city, state, country, postal_code,
-        tags, onboarding_date, status, notes
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        tags, onboarding_date, status, notes, workspace_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         company_name, full_name, email, phone, whatsapp, business_type,
         gst_number, tax_id, address, city, state, country, postal_code,
-        tags ? JSON.stringify(tags) : null, onboarding_date, status || 'active', notes
+        tags ? JSON.stringify(tags) : null, onboarding_date, status || 'active', notes,
+        workspaceId || null
       ]
     );
 

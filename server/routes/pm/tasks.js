@@ -233,7 +233,7 @@ router.post('/', authorizePermission('projects', 'create'), [
   body('title').trim().notEmpty().withMessage('Title is required'),
   body('priority').optional().isIn(['low', 'medium', 'high', 'critical']).withMessage('Invalid priority'),
   body('status').optional().isIn(['todo', 'in_progress', 'review', 'testing', 'done', 'blocked']).withMessage('Invalid status'),
-  body('parent_task_id').optional().isInt().withMessage('Parent task ID must be a valid integer'),
+  body('parent_task_id').optional({ nullable: true, checkFalsy: true }).isInt().withMessage('Parent task ID must be a valid integer'),
 ], async (req, res) => {
   try {
     const errors = validationResult(req);

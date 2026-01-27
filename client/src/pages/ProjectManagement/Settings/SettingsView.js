@@ -45,10 +45,10 @@ const SettingsView = ({ workspace }) => {
 
   // Search users for adding members
   const { data: usersData } = useQuery(
-    ['pm-users-search', userSearch],
-    () => pmAPI.getUsersForWorkspace(userSearch),
+    ['pm-users-search', workspace.id, userSearch],
+    () => pmAPI.getUsersForWorkspace(workspace.id, userSearch),
     {
-      enabled: isMemberModalOpen && userSearch.length >= 2,
+      enabled: isMemberModalOpen && userSearch.length >= 2 && !!workspace?.id,
       debounce: 300,
     }
   );

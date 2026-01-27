@@ -61,11 +61,15 @@ const generateUserStoryReference = async (workspaceId) => {
 const generateTaskReference = async (workspaceId) => {
   try {
     // Get the highest sequential number for this workspace
+    // Using subquery to avoid JOIN ambiguity with reference_number column
     const [result] = await dbQuery(
-      `SELECT COALESCE(MAX(CAST(SUBSTRING_INDEX(reference_number, '-', -1) AS UNSIGNED)), 0) as max_num
+      `SELECT COALESCE(MAX(CAST(SUBSTRING_INDEX(t.reference_number, '-', -1) AS UNSIGNED)), 0) as max_num
        FROM pm_tasks t
-       INNER JOIN pm_user_stories us ON t.user_story_id = us.id
-       WHERE us.workspace_id = ? AND t.reference_number LIKE ? AND t.parent_task_id IS NULL`,
+       WHERE t.user_story_id IN (
+         SELECT id FROM pm_user_stories WHERE workspace_id = ?
+       )
+       AND t.reference_number LIKE ?
+       AND t.parent_task_id IS NULL`,
       [workspaceId, `TASK-${workspaceId}-%`]
     );
 

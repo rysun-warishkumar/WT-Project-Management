@@ -6,6 +6,9 @@ import { Toaster } from 'react-hot-toast';
 // Components
 import Layout from './components/Layout/Layout';
 import Login from './pages/Auth/Login';
+import Register from './pages/Auth/Register';
+import VerifyEmail from './pages/Auth/VerifyEmail';
+import ResendVerification from './pages/Auth/ResendVerification';
 import Dashboard from './pages/Dashboard/Dashboard';
 import Clients from './pages/Clients/Clients';
 import ClientDetail from './pages/Clients/ClientDetail';
@@ -119,6 +122,30 @@ function App() {
                 element={
                   <PublicRoute>
                     <Login />
+                  </PublicRoute>
+                }
+              />
+              <Route
+                path="/register"
+                element={
+                  <PublicRoute>
+                    <Register />
+                  </PublicRoute>
+                }
+              />
+              <Route
+                path="/verify-email"
+                element={
+                  <PublicRoute>
+                    <VerifyEmail />
+                  </PublicRoute>
+                }
+              />
+              <Route
+                path="/resend-verification"
+                element={
+                  <PublicRoute>
+                    <ResendVerification />
                   </PublicRoute>
                 }
               />

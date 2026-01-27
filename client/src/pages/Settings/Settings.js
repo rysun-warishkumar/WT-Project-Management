@@ -19,7 +19,11 @@ import {
   Shield,
   Calendar,
   Clock,
+  Settings as SettingsIcon,
+  Send,
+  Server,
 } from 'lucide-react';
+import { settingsAPI } from '../../services/api';
 
 const Settings = () => {
   const { user, updateProfile, changePassword } = useAuth();
@@ -30,6 +34,8 @@ const Settings = () => {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [profileErrors, setProfileErrors] = useState({});
   const [passwordErrors, setPasswordErrors] = useState({});
+  const [smtpErrors, setSmtpErrors] = useState({});
+  const [testingSmtp, setTestingSmtp] = useState(false);
 
   // Profile form
   const {
@@ -55,6 +61,25 @@ const Settings = () => {
     watch: watchPassword,
   } = useForm();
 
+  // SMTP form
+  const {
+    register: registerSmtp,
+    handleSubmit: handleSubmitSmtp,
+    formState: { errors: smtpFormErrors, isSubmitting: isSubmittingSmtp },
+    reset: resetSmtp,
+    watch: watchSmtp,
+  } = useForm({
+    defaultValues: {
+      host: '',
+      port: '587',
+      secure: false,
+      user: '',
+      pass: '',
+      from: '',
+      enabled: false,
+    },
+  });
+
   // Fetch user profile
   const { data: profileData, isLoading: isLoadingProfile } = useQuery(
     'userProfile',
@@ -72,6 +97,31 @@ const Settings = () => {
       },
       onError: (error) => {
         toast.error(error.response?.data?.message || 'Failed to load profile');
+      },
+    }
+  );
+
+  // Fetch SMTP settings
+  const { data: smtpData, isLoading: isLoadingSmtp, refetch: refetchSmtp } = useQuery(
+    'smtpSettings',
+    async () => {
+      const response = await settingsAPI.getSettings();
+      return response.data.data.smtp;
+    },
+    {
+      onSuccess: (data) => {
+        resetSmtp({
+          host: data.host || '',
+          port: data.port || '587',
+          secure: data.secure || false,
+          user: data.user || '',
+          pass: '', // Don't populate password
+          from: data.from || '',
+          enabled: data.enabled || false,
+        });
+      },
+      onError: (error) => {
+        console.error('Failed to load SMTP settings:', error);
       },
     }
   );
@@ -224,6 +274,123 @@ const Settings = () => {
     return roleMap[role] || role;
   };
 
+  // Update SMTP settings mutation
+  const updateSmtpMutation = useMutation(
+    async (data) => {
+      const response = await settingsAPI.updateSmtpSettings(data);
+      return response.data;
+    },
+    {
+      onSuccess: (data) => {
+        refetchSmtp();
+        toast.success(data.message || 'SMTP settings updated successfully');
+        if (data.data?.test) {
+          if (data.data.test.success) {
+            toast.success(data.data.test.message);
+          } else {
+            toast.error(data.data.test.message);
+          }
+        }
+        setSmtpErrors({});
+      },
+      onError: (error) => {
+        const errorMessage = error.response?.data?.message || 'Failed to update SMTP settings';
+        toast.error(errorMessage);
+        setSmtpErrors({ general: errorMessage });
+      },
+    }
+  );
+
+  // Test SMTP connection mutation
+  const testSmtpMutation = useMutation(
+    async (data) => {
+      const response = await settingsAPI.testSmtpConnection(data);
+      return response.data;
+    },
+    {
+      onSuccess: (data) => {
+        toast.success(data.message || 'SMTP connection successful');
+        if (data.data?.testEmailSent) {
+          toast.success('Test email sent successfully');
+        }
+      },
+      onError: (error) => {
+        const errorMessage = error.response?.data?.message || 'SMTP connection failed';
+        toast.error(errorMessage);
+      },
+    }
+  );
+
+  // Handle SMTP form submission
+  const onSubmitSmtp = async (data) => {
+    setSmtpErrors({});
+
+    // Client-side validation
+    if (data.enabled) {
+      if (!data.host || !data.host.trim()) {
+        setSmtpErrors({ host: 'SMTP host is required when enabled' });
+        return;
+      }
+      if (!data.port || !data.port.trim()) {
+        setSmtpErrors({ port: 'SMTP port is required' });
+        return;
+      }
+      if (!data.user || !data.user.trim()) {
+        setSmtpErrors({ user: 'SMTP user (email) is required when enabled' });
+        return;
+      }
+      if (!data.pass || !data.pass.trim()) {
+        setSmtpErrors({ pass: 'SMTP password is required when enabled' });
+        return;
+      }
+      if (!data.from || !data.from.trim()) {
+        setSmtpErrors({ from: 'From email is required when enabled' });
+        return;
+      }
+    }
+
+    try {
+      await updateSmtpMutation.mutateAsync({
+        host: data.host.trim(),
+        port: parseInt(data.port) || 587,
+        secure: data.secure || false,
+        user: data.user.trim(),
+        pass: data.pass.trim() || undefined, // Only send if provided
+        from: data.from.trim(),
+        enabled: data.enabled || false,
+      });
+    } catch (error) {
+      // Error handled in mutation
+    }
+  };
+
+  // Handle SMTP test
+  const handleTestSmtp = async () => {
+    const formData = watchSmtp();
+    setSmtpErrors({});
+
+    if (!formData.host || !formData.port || !formData.user || !formData.pass) {
+      toast.error('Please fill in all required SMTP fields before testing');
+      return;
+    }
+
+    setTestingSmtp(true);
+    try {
+      await testSmtpMutation.mutateAsync({
+        host: formData.host.trim(),
+        port: parseInt(formData.port) || 587,
+        secure: formData.secure || false,
+        user: formData.user.trim(),
+        pass: formData.pass.trim(),
+        from: formData.from.trim() || formData.user.trim(),
+      });
+    } catch (error) {
+      // Error handled in mutation
+    } finally {
+      setTestingSmtp(false);
+    }
+  };
+
   if (isLoadingProfile) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -277,6 +444,17 @@ const Settings = () => {
           >
             <Info className="inline-block h-4 w-4 mr-2" />
             Account Information
+          </button>
+          <button
+            onClick={() => setActiveTab('smtp')}
+            className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
+              activeTab === 'smtp'
+                ? 'border-primary-600 text-primary-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+            }`}
+          >
+            <Mail className="inline-block h-4 w-4 mr-2" />
+            SMTP Configuration
           </button>
         </nav>
       </div>
@@ -748,6 +926,298 @@ const Settings = () => {
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* SMTP Configuration Tab */}
+      {activeTab === 'smtp' && (
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 sm:p-6">
+          <div className="mb-6">
+            <h2 className="text-xl font-semibold text-gray-900">SMTP Configuration</h2>
+            <p className="text-sm text-gray-600 mt-1">
+              Configure SMTP settings for sending emails (verification, credentials, notifications)
+            </p>
+          </div>
+
+          {isLoadingSmtp ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader className="h-8 w-8 animate-spin text-primary-600" />
+            </div>
+          ) : (
+            <>
+              {smtpErrors.general && (
+                <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg flex items-start">
+                  <AlertCircle className="h-5 w-5 text-red-600 mt-0.5 mr-2 flex-shrink-0" />
+                  <p className="text-sm text-red-800">{smtpErrors.general}</p>
+                </div>
+              )}
+
+              <form onSubmit={handleSubmitSmtp(onSubmitSmtp)} className="space-y-6">
+                {/* Enable/Disable SMTP */}
+                <div className="flex items-center space-x-3 p-4 bg-gray-50 rounded-lg">
+                  <input
+                    type="checkbox"
+                    id="smtp_enabled"
+                    {...registerSmtp('enabled')}
+                    className="h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded"
+                  />
+                  <label htmlFor="smtp_enabled" className="text-sm font-medium text-gray-700">
+                    Enable SMTP Email Sending
+                  </label>
+                </div>
+
+                {/* SMTP Host */}
+                <div>
+                  <label htmlFor="smtp_host" className="block text-sm font-medium text-gray-700 mb-2">
+                    SMTP Host <span className="text-red-500">*</span>
+                  </label>
+                  <div className="relative">
+                    <Server className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
+                    <input
+                      type="text"
+                      id="smtp_host"
+                      {...registerSmtp('host', {
+                        required: watchSmtp('enabled') ? 'SMTP host is required' : false,
+                      })}
+                      className={`form-input w-full pl-10 ${
+                        smtpFormErrors.host || smtpErrors.host
+                          ? 'border-red-300 focus:border-red-500 focus:ring-red-500'
+                          : 'border-gray-300 focus:border-primary-500 focus:ring-primary-500'
+                      }`}
+                      placeholder="smtp.gmail.com"
+                      disabled={!watchSmtp('enabled')}
+                    />
+                  </div>
+                  {(smtpFormErrors.host || smtpErrors.host) && (
+                    <p className="mt-1 text-sm text-red-600">
+                      {smtpFormErrors.host?.message || smtpErrors.host}
+                    </p>
+                  )}
+                </div>
+
+                {/* SMTP Port */}
+                <div>
+                  <label htmlFor="smtp_port" className="block text-sm font-medium text-gray-700 mb-2">
+                    SMTP Port <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="number"
+                    id="smtp_port"
+                    {...registerSmtp('port', {
+                      required: watchSmtp('enabled') ? 'SMTP port is required' : false,
+                      min: { value: 1, message: 'Port must be between 1 and 65535' },
+                      max: { value: 65535, message: 'Port must be between 1 and 65535' },
+                    })}
+                    className={`form-input w-full ${
+                      smtpFormErrors.port || smtpErrors.port
+                        ? 'border-red-300 focus:border-red-500 focus:ring-red-500'
+                        : 'border-gray-300 focus:border-primary-500 focus:ring-primary-500'
+                    }`}
+                    placeholder="587"
+                    disabled={!watchSmtp('enabled')}
+                  />
+                  {(smtpFormErrors.port || smtpErrors.port) && (
+                    <p className="mt-1 text-sm text-red-600">
+                      {smtpFormErrors.port?.message || smtpErrors.port}
+                    </p>
+                  )}
+                  <p className="mt-1 text-xs text-gray-500">
+                    Common ports: 587 (TLS), 465 (SSL), 25 (unencrypted)
+                  </p>
+                </div>
+
+                {/* Secure Connection */}
+                <div className="flex items-center space-x-3 p-4 bg-gray-50 rounded-lg">
+                  <input
+                    type="checkbox"
+                    id="smtp_secure"
+                    {...registerSmtp('secure')}
+                    className="h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded"
+                    disabled={!watchSmtp('enabled')}
+                  />
+                  <label htmlFor="smtp_secure" className="text-sm font-medium text-gray-700">
+                    Use Secure Connection (SSL/TLS)
+                  </label>
+                </div>
+
+                {/* SMTP User (Email) */}
+                <div>
+                  <label htmlFor="smtp_user" className="block text-sm font-medium text-gray-700 mb-2">
+                    SMTP User (Email) <span className="text-red-500">*</span>
+                  </label>
+                  <div className="relative">
+                    <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
+                    <input
+                      type="email"
+                      id="smtp_user"
+                      {...registerSmtp('user', {
+                        required: watchSmtp('enabled') ? 'SMTP user email is required' : false,
+                        pattern: {
+                          value: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
+                          message: 'Please enter a valid email address',
+                        },
+                      })}
+                      className={`form-input w-full pl-10 ${
+                        smtpFormErrors.user || smtpErrors.user
+                          ? 'border-red-300 focus:border-red-500 focus:ring-red-500'
+                          : 'border-gray-300 focus:border-primary-500 focus:ring-primary-500'
+                      }`}
+                      placeholder="your-email@example.com"
+                      disabled={!watchSmtp('enabled')}
+                    />
+                  </div>
+                  {(smtpFormErrors.user || smtpErrors.user) && (
+                    <p className="mt-1 text-sm text-red-600">
+                      {smtpFormErrors.user?.message || smtpErrors.user}
+                    </p>
+                  )}
+                </div>
+
+                {/* SMTP Password */}
+                <div>
+                  <label htmlFor="smtp_pass" className="block text-sm font-medium text-gray-700 mb-2">
+                    SMTP Password <span className="text-red-500">*</span>
+                  </label>
+                  <div className="relative">
+                    <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
+                    <input
+                      type="password"
+                      id="smtp_pass"
+                      {...registerSmtp('pass', {
+                        required: watchSmtp('enabled') ? 'SMTP password is required' : false,
+                      })}
+                      className={`form-input w-full pl-10 ${
+                        smtpFormErrors.pass || smtpErrors.pass
+                          ? 'border-red-300 focus:border-red-500 focus:ring-red-500'
+                          : 'border-gray-300 focus:border-primary-500 focus:ring-primary-500'
+                      }`}
+                      placeholder="Enter SMTP password"
+                      disabled={!watchSmtp('enabled')}
+                    />
+                  </div>
+                  {(smtpFormErrors.pass || smtpErrors.pass) && (
+                    <p className="mt-1 text-sm text-red-600">
+                      {smtpFormErrors.pass?.message || smtpErrors.pass}
+                    </p>
+                  )}
+                  <p className="mt-1 text-xs text-gray-500">
+                    For Gmail, use an App Password instead of your regular password
+                  </p>
+                </div>
+
+                {/* From Email */}
+                <div>
+                  <label htmlFor="smtp_from" className="block text-sm font-medium text-gray-700 mb-2">
+                    From Email Address <span className="text-red-500">*</span>
+                  </label>
+                  <div className="relative">
+                    <Send className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
+                    <input
+                      type="email"
+                      id="smtp_from"
+                      {...registerSmtp('from', {
+                        required: watchSmtp('enabled') ? 'From email is required' : false,
+                        pattern: {
+                          value: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
+                          message: 'Please enter a valid email address',
+                        },
+                      })}
+                      className={`form-input w-full pl-10 ${
+                        smtpFormErrors.from || smtpErrors.from
+                          ? 'border-red-300 focus:border-red-500 focus:ring-red-500'
+                          : 'border-gray-300 focus:border-primary-500 focus:ring-primary-500'
+                      }`}
+                      placeholder="noreply@example.com"
+                      disabled={!watchSmtp('enabled')}
+                    />
+                  </div>
+                  {(smtpFormErrors.from || smtpErrors.from) && (
+                    <p className="mt-1 text-sm text-red-600">
+                      {smtpFormErrors.from?.message || smtpErrors.from}
+                    </p>
+                  )}
+                  <p className="mt-1 text-xs text-gray-500">
+                    This email will appear as the sender for all system emails
+                  </p>
+                </div>
+
+                {/* Info Box */}
+                <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                  <div className="flex items-start">
+                    <Info className="h-5 w-5 text-blue-600 mt-0.5 mr-3 flex-shrink-0" />
+                    <div>
+                      <h4 className="text-sm font-medium text-blue-900 mb-1">SMTP Configuration Tips</h4>
+                      <ul className="text-sm text-blue-800 space-y-1 list-disc list-inside">
+                        <li>Gmail: Use port 587 with TLS, or port 465 with SSL</li>
+                        <li>Gmail requires an App Password (not your regular password)</li>
+                        <li>Outlook/Hotmail: Use port 587 with TLS</li>
+                        <li>Yahoo: Use port 587 with TLS</li>
+                        <li>Test your connection before saving</li>
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Action Buttons */}
+                <div className="flex flex-col sm:flex-row gap-3 pt-4 border-t border-gray-200">
+                  <button
+                    type="submit"
+                    disabled={isSubmittingSmtp || updateSmtpMutation.isLoading || !watchSmtp('enabled')}
+                    className="btn btn-primary flex items-center justify-center"
+                  >
+                    {isSubmittingSmtp || updateSmtpMutation.isLoading ? (
+                      <>
+                        <Loader className="h-4 w-4 animate-spin mr-2" />
+                        Saving...
+                      </>
+                    ) : (
+                      <>
+                        <Save className="h-4 w-4 mr-2" />
+                        Save SMTP Settings
+                      </>
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleTestSmtp}
+                    disabled={testingSmtp || testSmtpMutation.isLoading || !watchSmtp('enabled')}
+                    className="btn btn-secondary flex items-center justify-center"
+                  >
+                    {testingSmtp || testSmtpMutation.isLoading ? (
+                      <>
+                        <Loader className="h-4 w-4 animate-spin mr-2" />
+                        Testing...
+                      </>
+                    ) : (
+                      <>
+                        <Send className="h-4 w-4 mr-2" />
+                        Test Connection
+                      </>
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      resetSmtp({
+                        host: smtpData?.host || '',
+                        port: smtpData?.port || '587',
+                        secure: smtpData?.secure || false,
+                        user: smtpData?.user || '',
+                        pass: '',
+                        from: smtpData?.from || '',
+                        enabled: smtpData?.enabled || false,
+                      });
+                      setSmtpErrors({});
+                    }}
+                    className="btn btn-secondary"
+                    disabled={isSubmittingSmtp || updateSmtpMutation.isLoading}
+                  >
+                    Reset
+                  </button>
+                </div>
+              </form>
+            </>
+          )}
         </div>
       )}
     </div>

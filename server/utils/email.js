@@ -1,18 +1,74 @@
 const nodemailer = require('nodemailer');
 require('dotenv').config();
 
-// Create transporter
-const createTransporter = () => {
-  // If SMTP is configured, use it; otherwise use a test account
+/**
+ * Get SMTP configuration from database settings or environment
+ * @returns {Promise<Object>} SMTP configuration
+ */
+const getSmtpConfig = async () => {
+  try {
+    // Try to get from database settings first
+    const { query } = require('../config/database');
+    const settings = await query(
+      `SELECT setting_key, setting_value 
+       FROM system_settings 
+       WHERE setting_key LIKE 'smtp_%'`
+    );
+
+    if (settings.length > 0) {
+      const smtpConfig = {};
+      settings.forEach(setting => {
+        const key = setting.setting_key.replace('smtp_', '');
+        smtpConfig[key] = setting.setting_value;
+      });
+
+      // Check if SMTP is enabled in settings
+      if (smtpConfig.enabled === 'true' && smtpConfig.host && smtpConfig.user && smtpConfig.pass) {
+        return {
+          host: smtpConfig.host,
+          port: parseInt(smtpConfig.port) || 587,
+          secure: smtpConfig.secure === 'true',
+          auth: {
+            user: smtpConfig.user,
+            pass: smtpConfig.pass
+          },
+          from: smtpConfig.from || smtpConfig.user
+        };
+      }
+    }
+  } catch (error) {
+    // If system_settings table doesn't exist or query fails, fall back to env
+    console.log('Using environment SMTP configuration:', error.message);
+  }
+
+  // Fall back to environment variables
   if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
-    return nodemailer.createTransport({
+    return {
       host: process.env.SMTP_HOST,
       port: parseInt(process.env.SMTP_PORT) || 587,
-      secure: process.env.SMTP_SECURE === 'true', // true for 465, false for other ports
+      secure: process.env.SMTP_SECURE === 'true',
       auth: {
         user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS,
+        pass: process.env.SMTP_PASS
       },
+      from: process.env.SMTP_FROM || process.env.SMTP_USER
+    };
+  }
+
+  return null;
+};
+
+// Create transporter
+const createTransporter = async () => {
+  // Get SMTP config from database or environment
+  const smtpConfig = await getSmtpConfig();
+
+  if (smtpConfig) {
+    return nodemailer.createTransport({
+      host: smtpConfig.host,
+      port: smtpConfig.port,
+      secure: smtpConfig.secure,
+      auth: smtpConfig.auth
     });
   } else {
     // For development, use console logging instead of actual email
@@ -33,10 +89,15 @@ const createTransporter = () => {
 // Send client credentials email
 const sendClientCredentials = async (clientData, credentials) => {
   try {
-    const transporter = createTransporter();
+    // Get SMTP config to use the correct 'from' address
+    const smtpConfig = await getSmtpConfig();
+    const transporter = await createTransporter();
+    
+    // Use the 'from' address from SMTP config, or fallback to user email
+    const fromAddress = smtpConfig?.from || smtpConfig?.auth?.user || process.env.SMTP_FROM || process.env.SMTP_USER || 'noreply@example.com';
     
     const mailOptions = {
-      from: process.env.SMTP_FROM || process.env.SMTP_USER || 'noreply@example.com',
+      from: fromAddress,
       to: clientData.email,
       subject: `Welcome to ${process.env.APP_NAME || 'Client Management System'} - Your Login Credentials`,
       html: `
@@ -139,7 +200,108 @@ ${process.env.APP_NAME || 'Client Management System'} Team
   }
 };
 
+// Send email verification email
+const sendVerificationEmail = async (userData, verificationToken) => {
+  try {
+    // Get SMTP config to use the correct 'from' address
+    const smtpConfig = await getSmtpConfig();
+    const transporter = await createTransporter();
+    
+    // Use the 'from' address from SMTP config, or fallback to user email
+    const fromAddress = smtpConfig?.from || smtpConfig?.auth?.user || process.env.SMTP_FROM || process.env.SMTP_USER || 'noreply@example.com';
+    
+    // Use CLIENT_URL for frontend URLs, fallback to APP_URL or localhost
+    const baseUrl = process.env.CLIENT_URL || process.env.APP_URL || 'http://localhost:3000';
+    const verificationUrl = `${baseUrl}/verify-email?token=${encodeURIComponent(verificationToken)}`;
+    
+    const mailOptions = {
+      from: fromAddress,
+      to: userData.email,
+      subject: `Verify Your Email - ${process.env.APP_NAME || 'Client Management System'}`,
+      html: `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Verify Your Email</title>
+        </head>
+        <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+          <div style="background-color: #4F46E5; color: white; padding: 20px; text-align: center; border-radius: 8px 8px 0 0;">
+            <h1 style="margin: 0;">Verify Your Email Address</h1>
+          </div>
+          
+          <div style="background-color: #f9fafb; padding: 30px; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 8px 8px;">
+            <p style="font-size: 16px; margin-bottom: 20px;">Dear ${userData.full_name || userData.email},</p>
+            
+            <p style="font-size: 16px; margin-bottom: 20px;">
+              Thank you for registering with ${process.env.APP_NAME || 'Client Management System'}! 
+              Please verify your email address by clicking the button below:
+            </p>
+            
+            <div style="text-align: center; margin: 30px 0;">
+              <a href="${verificationUrl}" 
+                 style="display: inline-block; background-color: #4F46E5; color: white; padding: 12px 30px; text-decoration: none; border-radius: 6px; font-weight: bold;">
+                Verify Email Address
+              </a>
+            </div>
+            
+            <p style="font-size: 14px; color: #6b7280; margin-top: 30px;">
+              Or copy and paste this link into your browser:<br>
+              <a href="${verificationUrl}" style="color: #4F46E5; word-break: break-all;">${verificationUrl}</a>
+            </p>
+            
+            <div style="background-color: #FEF3C7; border-left: 4px solid #F59E0B; padding: 15px; margin: 20px 0; border-radius: 4px;">
+              <p style="margin: 0; font-size: 14px;">
+                <strong>⚠️ Important:</strong> This verification link will expire in 24 hours. 
+                If you didn't create an account, please ignore this email.
+              </p>
+            </div>
+            
+            <p style="font-size: 16px; margin-top: 30px;">
+              Best regards,<br>
+              <strong>${process.env.APP_NAME || 'Client Management System'} Team</strong>
+            </p>
+          </div>
+          
+          <div style="text-align: center; margin-top: 20px; padding: 20px; color: #6b7280; font-size: 12px;">
+            <p style="margin: 0;">
+              This is an automated email. Please do not reply to this message.
+            </p>
+          </div>
+        </body>
+        </html>
+      `,
+      text: `
+Verify Your Email Address
+
+Dear ${userData.full_name || userData.email},
+
+Thank you for registering with ${process.env.APP_NAME || 'Client Management System'}! 
+Please verify your email address by visiting this link:
+
+${verificationUrl}
+
+⚠️ Important: This verification link will expire in 24 hours. 
+If you didn't create an account, please ignore this email.
+
+Best regards,
+${process.env.APP_NAME || 'Client Management System'} Team
+      `,
+    };
+
+    const info = await transporter.sendMail(mailOptions);
+    console.log('Verification email sent successfully:', info.messageId);
+    return { success: true, messageId: info.messageId };
+  } catch (error) {
+    console.error('Error sending verification email:', error);
+    return { success: false, error: error.message };
+  }
+};
+
 module.exports = {
   sendClientCredentials,
+  sendVerificationEmail,
   createTransporter,
+  getSmtpConfig,
 };

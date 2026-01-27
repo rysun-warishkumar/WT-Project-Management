@@ -176,6 +176,7 @@ app.get('/api/health', (req, res) => {
 
 // API Routes
 app.use('/api/auth', authRoutes);
+console.log('✅ Auth routes registered at /api/auth');
 app.use('/api/clients', clientRoutes);
 app.use('/api/projects', projectRoutes);
 app.use('/api/quotations', quotationRoutes);
@@ -204,6 +205,7 @@ app.use('/api/pm/cicd', pmCicdRoutes);
 app.use('/api/pm/reference', pmReferenceRoutes);
 app.use('/api/pm/assignments', pmAssignmentRoutes);
 app.use('/api/pm/chat', pmChatRoutes);
+app.use('/api/settings', require('./routes/settings'));
 
 // Error handling middleware - must include CORS headers
 app.use((err, req, res, next) => {
@@ -255,9 +257,10 @@ app.use((err, req, res, next) => {
 app.use('*', (req, res) => {
   // Only handle API routes
   if (req.path.startsWith('/api')) {
+    console.log(`❌ API route not found: ${req.method} ${req.path}`);
     return res.status(404).json({
       success: false,
-      message: 'API route not found'
+      message: 'Route not found'
     });
   }
   // For non-API routes, return 404 (frontend should handle these)

@@ -503,21 +503,55 @@ router.delete('/workspace/:workspaceId/members/:memberId', authorizePermission('
   }
 });
 
-// Get all users (for adding members)
+// Get users for adding members (filtered by workspace)
 router.get('/users', authorizePermission('projects', 'view'), async (req, res) => {
   try {
-    const { search } = req.query;
+    const { search, workspace_id } = req.query;
     
-    let query = 'SELECT id, full_name, email, username FROM users WHERE 1=1';
-    const params = [];
+    if (!workspace_id) {
+      return res.status(400).json({
+        success: false,
+        message: 'Workspace ID is required'
+      });
+    }
+
+    // Get the main workspace ID from the PM workspace
+    const [pmWorkspace] = await dbQuery(
+      'SELECT main_workspace_id FROM pm_workspaces WHERE id = ?',
+      [workspace_id]
+    );
+
+    if (!pmWorkspace || !pmWorkspace.main_workspace_id) {
+      return res.status(404).json({
+        success: false,
+        message: 'Workspace not found or not linked to a main workspace'
+      });
+    }
+
+    const mainWorkspaceId = pmWorkspace.main_workspace_id;
+    
+    // Build query to get users from the same workspace
+    // Exclude users who are already members of this PM workspace
+    let query = `
+      SELECT DISTINCT u.id, u.full_name, u.email, u.username 
+      FROM users u
+      WHERE u.workspace_id = ?
+        AND u.is_active = 1
+        AND u.id NOT IN (
+          SELECT wm.user_id 
+          FROM pm_workspace_members wm 
+          WHERE wm.workspace_id = ?
+        )
+    `;
+    const params = [mainWorkspaceId, workspace_id];
 
     if (search) {
-      query += ' AND (full_name LIKE ? OR email LIKE ? OR username LIKE ?)';
+      query += ' AND (u.full_name LIKE ? OR u.email LIKE ? OR u.username LIKE ?)';
       const searchTerm = `%${search}%`;
       params.push(searchTerm, searchTerm, searchTerm);
     }
 
-    query += ' ORDER BY full_name ASC LIMIT 50';
+    query += ' ORDER BY u.full_name ASC LIMIT 50';
 
     const users = await dbQuery(query, params);
 

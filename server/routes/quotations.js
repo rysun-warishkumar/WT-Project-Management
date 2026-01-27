@@ -3,10 +3,12 @@ const router = express.Router();
 const { authenticateToken, authorizeRoles, authorizePermission } = require('../middleware/auth');
 const { body, validationResult, query: validatorQuery } = require('express-validator');
 const { query: dbQuery } = require('../config/database');
-const { getClientFilter, canAccessClientData } = require('../utils/dataFiltering');
+const { getClientFilter, canAccessClientData, getWorkspaceFilter } = require('../utils/dataFiltering');
+const { workspaceContext } = require('../middleware/workspaceContext');
 
-// Apply authentication to all routes
+// Apply authentication + workspace context to all routes
 router.use(authenticateToken);
+router.use(workspaceContext);
 
 // Validation middleware
 const validateQuotation = [
@@ -38,11 +40,15 @@ const validateQuotationItem = [
 ];
 
 // Helper function to generate quote number
-const generateQuoteNumber = async () => {
+const generateQuoteNumber = async (req) => {
   const year = new Date().getFullYear();
+  // Scope quote number generation per workspace (so two workspaces don't influence each other).
+  // Super admin has no workspace filter; in that case counts across all.
+  // Note: This is best-effort; ideally use a dedicated sequence per workspace.
+  const ws = getWorkspaceFilter(req, '', 'workspace_id');
   const result = await dbQuery(
-    'SELECT COUNT(*) as count FROM quotations WHERE YEAR(created_at) = ?',
-    [year]
+    `SELECT COUNT(*) as count FROM quotations WHERE YEAR(created_at) = ? ${ws.whereClause}`,
+    [year, ...ws.whereParams]
   );
   const count = result[0].count + 1;
   return `QT-${year}-${count.toString().padStart(4, '0')}`;
@@ -108,6 +114,11 @@ router.get('/', authorizePermission('quotations', 'view'), [
     // Build WHERE clause
     let whereClause = 'WHERE 1=1';
     const whereParams = [];
+
+    // Add workspace filter (primary)
+    const workspaceFilter = getWorkspaceFilter(req, 'q', 'workspace_id');
+    whereClause += workspaceFilter.whereClause;
+    whereParams.push(...workspaceFilter.whereParams);
 
     // Add client filter for client role users
     const clientFilter = getClientFilter(req, 'q', 'client_id');
@@ -221,6 +232,7 @@ router.get('/:id', authorizePermission('quotations', 'view'), async (req, res) =
   try {
     const quotationId = req.params.id;
 
+    const ws = getWorkspaceFilter(req, 'q', 'workspace_id');
     const quotations = await dbQuery(
       `SELECT 
         q.*,
@@ -236,8 +248,8 @@ router.get('/:id', authorizePermission('quotations', 'view'), async (req, res) =
        LEFT JOIN clients c ON q.client_id = c.id
        LEFT JOIN projects p ON q.project_id = p.id
        LEFT JOIN users u ON q.created_by = u.id
-       WHERE q.id = ?`,
-      [quotationId]
+       WHERE q.id = ? ${ws.whereClause}`,
+      [quotationId, ...ws.whereParams]
     );
 
     if (quotations.length === 0) {
@@ -267,8 +279,8 @@ router.get('/:id', authorizePermission('quotations', 'view'), async (req, res) =
     let invoices = [];
     try {
       const invoiceResult = await dbQuery(
-        'SELECT * FROM invoices WHERE quotation_id = ? ORDER BY created_at DESC',
-        [quotationId]
+        `SELECT * FROM invoices WHERE quotation_id = ? ${getWorkspaceFilter(req, '', 'workspace_id').whereClause} ORDER BY created_at DESC`,
+        [quotationId, ...getWorkspaceFilter(req, '', 'workspace_id').whereParams]
       );
       invoices = invoiceResult;
     } catch (error) {
@@ -327,8 +339,17 @@ router.post('/', authorizePermission('quotations', 'create'), validateQuotation,
       items
     } = req.body;
 
+    const workspaceId = req.workspaceId || req.workspaceFilter?.value;
+    if (!workspaceId && !req.isSuperAdmin) {
+      return res.status(403).json({ success: false, message: 'Workspace context required' });
+    }
+
     // Check if client exists
-    const clientCheck = await dbQuery('SELECT id FROM clients WHERE id = ?', [client_id]);
+    const wsCli = getWorkspaceFilter(req, '', 'workspace_id');
+    const clientCheck = await dbQuery(
+      `SELECT id FROM clients WHERE id = ? ${wsCli.whereClause}`,
+      [client_id, ...wsCli.whereParams]
+    );
     if (clientCheck.length === 0) {
       return res.status(400).json({
         success: false,
@@ -338,7 +359,11 @@ router.post('/', authorizePermission('quotations', 'create'), validateQuotation,
 
     // Check if project exists (if provided)
     if (project_id) {
-      const projectCheck = await dbQuery('SELECT id FROM projects WHERE id = ?', [project_id]);
+      const wsProj = getWorkspaceFilter(req, '', 'workspace_id');
+      const projectCheck = await dbQuery(
+        `SELECT id FROM projects WHERE id = ? ${wsProj.whereClause}`,
+        [project_id, ...wsProj.whereParams]
+      );
       if (projectCheck.length === 0) {
         return res.status(400).json({
           success: false,
@@ -348,7 +373,7 @@ router.post('/', authorizePermission('quotations', 'create'), validateQuotation,
     }
 
     // Generate quote number if not provided
-    const finalQuoteNumber = quote_number || await generateQuoteNumber();
+    const finalQuoteNumber = quote_number || await generateQuoteNumber(req);
 
     // Calculate totals if not provided
     let finalSubtotal = subtotal;
@@ -367,12 +392,12 @@ router.post('/', authorizePermission('quotations', 'create'), validateQuotation,
       `INSERT INTO quotations (
         quote_number, client_id, project_id, quote_date, valid_till_date,
         status, subtotal, tax_rate, tax_amount, total_amount, currency,
-        notes, terms_conditions, created_by
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        notes, terms_conditions, created_by, workspace_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         finalQuoteNumber, client_id, project_id, quote_date, valid_till_date,
         status, finalSubtotal, tax_rate || 0, finalTaxAmount, finalTotalAmount, currency || 'USD',
-        notes, terms_conditions, req.user.id
+        notes, terms_conditions, req.user.id, workspaceId || null
       ]
     );
 
@@ -407,8 +432,8 @@ router.post('/', authorizePermission('quotations', 'create'), validateQuotation,
        FROM quotations q
        LEFT JOIN clients c ON q.client_id = c.id
        LEFT JOIN projects p ON q.project_id = p.id
-       WHERE q.id = ?`,
-      [quotationId]
+       WHERE q.id = ? ${getWorkspaceFilter(req, 'q', 'workspace_id').whereClause}`,
+      [quotationId, ...getWorkspaceFilter(req, 'q', 'workspace_id').whereParams]
     );
 
     res.status(201).json({
@@ -456,7 +481,11 @@ router.put('/:id', authorizePermission('quotations', 'edit'), validateQuotation,
     } = req.body;
 
     // Check if quotation exists
-    const quotationCheck = await dbQuery('SELECT id FROM quotations WHERE id = ?', [quotationId]);
+    const wsQ = getWorkspaceFilter(req, '', 'workspace_id');
+    const quotationCheck = await dbQuery(
+      `SELECT id FROM quotations WHERE id = ? ${wsQ.whereClause}`,
+      [quotationId, ...wsQ.whereParams]
+    );
     if (quotationCheck.length === 0) {
       return res.status(404).json({
         success: false,
@@ -465,7 +494,11 @@ router.put('/:id', authorizePermission('quotations', 'edit'), validateQuotation,
     }
 
     // Check if client exists
-    const clientCheck = await dbQuery('SELECT id FROM clients WHERE id = ?', [client_id]);
+    const wsC = getWorkspaceFilter(req, '', 'workspace_id');
+    const clientCheck = await dbQuery(
+      `SELECT id FROM clients WHERE id = ? ${wsC.whereClause}`,
+      [client_id, ...wsC.whereParams]
+    );
     if (clientCheck.length === 0) {
       return res.status(400).json({
         success: false,
@@ -475,7 +508,11 @@ router.put('/:id', authorizePermission('quotations', 'edit'), validateQuotation,
 
     // Check if project exists (if provided)
     if (project_id) {
-      const projectCheck = await dbQuery('SELECT id FROM projects WHERE id = ?', [project_id]);
+      const wsP = getWorkspaceFilter(req, '', 'workspace_id');
+      const projectCheck = await dbQuery(
+        `SELECT id FROM projects WHERE id = ? ${wsP.whereClause}`,
+        [project_id, ...wsP.whereParams]
+      );
       if (projectCheck.length === 0) {
         return res.status(400).json({
           success: false,
@@ -497,16 +534,17 @@ router.put('/:id', authorizePermission('quotations', 'edit'), validateQuotation,
     }
 
     // Update quotation
+    const wsUpd = getWorkspaceFilter(req, '', 'workspace_id');
     await dbQuery(
       `UPDATE quotations SET
         quote_number = ?, client_id = ?, project_id = ?, quote_date = ?, valid_till_date = ?,
         status = ?, subtotal = ?, tax_rate = ?, tax_amount = ?, total_amount = ?, currency = ?,
         notes = ?, terms_conditions = ?, updated_at = CURRENT_TIMESTAMP
-       WHERE id = ?`,
+       WHERE id = ? ${wsUpd.whereClause}`,
       [
         quote_number, client_id, project_id, quote_date, valid_till_date,
         status, finalSubtotal, tax_rate || 0, finalTaxAmount, finalTotalAmount, currency || 'USD',
-        notes, terms_conditions, quotationId
+        notes, terms_conditions, quotationId, ...wsUpd.whereParams
       ]
     );
 
@@ -543,8 +581,8 @@ router.put('/:id', authorizePermission('quotations', 'edit'), validateQuotation,
        FROM quotations q
        LEFT JOIN clients c ON q.client_id = c.id
        LEFT JOIN projects p ON q.project_id = p.id
-       WHERE q.id = ?`,
-      [quotationId]
+       WHERE q.id = ? ${getWorkspaceFilter(req, 'q', 'workspace_id').whereClause}`,
+      [quotationId, ...getWorkspaceFilter(req, 'q', 'workspace_id').whereParams]
     );
 
     res.json({
@@ -567,7 +605,11 @@ router.delete('/:id', authorizePermission('quotations', 'delete'), async (req, r
     const quotationId = req.params.id;
 
     // Check if quotation exists
-    const quotationCheck = await dbQuery('SELECT id FROM quotations WHERE id = ?', [quotationId]);
+    const wsDel = getWorkspaceFilter(req, '', 'workspace_id');
+    const quotationCheck = await dbQuery(
+      `SELECT id FROM quotations WHERE id = ? ${wsDel.whereClause}`,
+      [quotationId, ...wsDel.whereParams]
+    );
     if (quotationCheck.length === 0) {
       return res.status(404).json({
         success: false,
@@ -576,7 +618,11 @@ router.delete('/:id', authorizePermission('quotations', 'delete'), async (req, r
     }
 
     // Check if quotation has related invoices
-    const invoiceCheck = await dbQuery('SELECT id FROM invoices WHERE quotation_id = ? LIMIT 1', [quotationId]);
+    const wsInv = getWorkspaceFilter(req, '', 'workspace_id');
+    const invoiceCheck = await dbQuery(
+      `SELECT id FROM invoices WHERE quotation_id = ? ${wsInv.whereClause} LIMIT 1`,
+      [quotationId, ...wsInv.whereParams]
+    );
     if (invoiceCheck.length > 0) {
       return res.status(400).json({
         success: false,
@@ -588,7 +634,8 @@ router.delete('/:id', authorizePermission('quotations', 'delete'), async (req, r
     await dbQuery('DELETE FROM quotation_items WHERE quotation_id = ?', [quotationId]);
 
     // Delete quotation
-    await dbQuery('DELETE FROM quotations WHERE id = ?', [quotationId]);
+    const wsD = getWorkspaceFilter(req, '', 'workspace_id');
+    await dbQuery(`DELETE FROM quotations WHERE id = ? ${wsD.whereClause}`, [quotationId, ...wsD.whereParams]);
 
     res.json({
       success: true,
@@ -610,9 +657,10 @@ router.post('/:id/convert-to-invoice', authorizePermission('invoices', 'create')
     const { invoice_date, due_date, payment_terms } = req.body;
 
     // Check if quotation exists and is accepted
+    const ws = getWorkspaceFilter(req, '', 'workspace_id');
     const quotationCheck = await dbQuery(
-      'SELECT * FROM quotations WHERE id = ? AND status = "accepted"',
-      [quotationId]
+      `SELECT * FROM quotations WHERE id = ? AND status = "accepted" ${ws.whereClause}`,
+      [quotationId, ...ws.whereParams]
     );
     if (quotationCheck.length === 0) {
       return res.status(400).json({
@@ -625,22 +673,24 @@ router.post('/:id/convert-to-invoice', authorizePermission('invoices', 'create')
 
     // Generate invoice number
     const year = new Date().getFullYear();
+    const wsi = getWorkspaceFilter(req, '', 'workspace_id');
     const invoiceCount = await dbQuery(
-      'SELECT COUNT(*) as count FROM invoices WHERE YEAR(created_at) = ?',
-      [year]
+      `SELECT COUNT(*) as count FROM invoices WHERE YEAR(created_at) = ? ${wsi.whereClause}`,
+      [year, ...wsi.whereParams]
     );
     const invoiceNumber = `INV-${year}-${(invoiceCount[0].count + 1).toString().padStart(4, '0')}`;
 
     // Create invoice
+    const workspaceId = req.workspaceId || req.workspaceFilter?.value;
     const invoiceResult = await dbQuery(
       `INSERT INTO invoices (
         invoice_number, quotation_id, client_id, project_id, invoice_date, due_date,
-        status, subtotal, tax_rate, tax_amount, total_amount, currency, created_by
-      ) VALUES (?, ?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?)`,
+        status, subtotal, tax_rate, tax_amount, total_amount, currency, created_by, workspace_id
+      ) VALUES (?, ?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?)`,
       [
         invoiceNumber, quotationId, quotation.client_id, quotation.project_id,
         invoice_date, due_date, quotation.subtotal, quotation.tax_rate,
-        quotation.tax_amount, quotation.total_amount, quotation.currency, req.user.id
+        quotation.tax_amount, quotation.total_amount, quotation.currency, req.user.id, workspaceId || null
       ]
     );
 
@@ -669,9 +719,10 @@ router.post('/:id/convert-to-invoice', authorizePermission('invoices', 'create')
     }
 
     // Update quotation status
+    const wsq = getWorkspaceFilter(req, '', 'workspace_id');
     await dbQuery(
-      'UPDATE quotations SET status = "accepted", updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-      [quotationId]
+      `UPDATE quotations SET status = "accepted", updated_at = CURRENT_TIMESTAMP WHERE id = ? ${wsq.whereClause}`,
+      [quotationId, ...wsq.whereParams]
     );
 
     res.status(201).json({
@@ -691,6 +742,7 @@ router.post('/:id/convert-to-invoice', authorizePermission('invoices', 'create')
 // Get quotation statistics
 router.get('/stats/overview', authorizePermission('quotations', 'view'), async (req, res) => {
   try {
+    const ws = getWorkspaceFilter(req, '', 'workspace_id');
     const stats = await dbQuery(`
       SELECT
         COUNT(*) as total_quotations,
@@ -702,7 +754,8 @@ router.get('/stats/overview', authorizePermission('quotations', 'view'), async (
         SUM(total_amount) as total_value,
         AVG(total_amount) as avg_value
       FROM quotations
-    `);
+      WHERE 1=1 ${ws.whereClause}
+    `, ws.whereParams);
 
     const recentQuotations = await dbQuery(`
       SELECT 
@@ -711,9 +764,10 @@ router.get('/stats/overview', authorizePermission('quotations', 'view'), async (
         c.company_name as client_company
       FROM quotations q
       LEFT JOIN clients c ON q.client_id = c.id
+      WHERE 1=1 ${getWorkspaceFilter(req, 'q', 'workspace_id').whereClause}
       ORDER BY q.created_at DESC
       LIMIT 5
-    `);
+    `, getWorkspaceFilter(req, 'q', 'workspace_id').whereParams);
 
     res.json({
       success: true,

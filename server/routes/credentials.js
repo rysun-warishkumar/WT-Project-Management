@@ -3,12 +3,14 @@ const crypto = require('crypto');
 const { authenticateToken, authorizePermission } = require('../middleware/auth');
 const { body, validationResult, query: validatorQuery } = require('express-validator');
 const { query: dbQuery } = require('../config/database');
-const { getClientFilter, canAccessClientData } = require('../utils/dataFiltering');
+const { getClientFilter, canAccessClientData, getWorkspaceFilter } = require('../utils/dataFiltering');
+const { workspaceContext } = require('../middleware/workspaceContext');
 
 const router = express.Router();
 
-// Apply authentication to all routes
+// Apply authentication + workspace context to all routes
 router.use(authenticateToken);
+router.use(workspaceContext);
 
 // Encryption key from environment or use default (should be set in production)
 // AES-256 requires a 32-byte (256-bit) key
@@ -130,6 +132,11 @@ router.get('/', authorizePermission('credentials', 'view'), [
     // Build WHERE clause
     let whereClause = 'WHERE 1=1';
     const whereParams = [];
+
+    // Add workspace filter (primary)
+    const workspaceFilter = getWorkspaceFilter(req, 'c', 'workspace_id');
+    whereClause += workspaceFilter.whereClause;
+    whereParams.push(...workspaceFilter.whereParams);
 
     // Add client filter for client role users
     const clientFilter = getClientFilter(req, 'c', 'client_id');
@@ -301,9 +308,18 @@ router.post('/', authorizePermission('credentials', 'create'), validateCredentia
       notes
     } = req.body;
 
+    const workspaceId = req.workspaceId || req.workspaceFilter?.value;
+    if (!workspaceId && !req.isSuperAdmin) {
+      return res.status(403).json({ success: false, message: 'Workspace context required' });
+    }
+
     // Check if client exists (if provided)
     if (client_id) {
-      const clientCheck = await dbQuery('SELECT id FROM clients WHERE id = ?', [client_id]);
+      const wsCli = getWorkspaceFilter(req, '', 'workspace_id');
+      const clientCheck = await dbQuery(
+        `SELECT id FROM clients WHERE id = ? ${wsCli.whereClause}`,
+        [client_id, ...wsCli.whereParams]
+      );
       if (clientCheck.length === 0) {
         return res.status(400).json({
           success: false,
@@ -314,7 +330,11 @@ router.post('/', authorizePermission('credentials', 'create'), validateCredentia
 
     // Check if project exists (if provided)
     if (project_id) {
-      const projectCheck = await dbQuery('SELECT id FROM projects WHERE id = ?', [project_id]);
+      const wsProj = getWorkspaceFilter(req, '', 'workspace_id');
+      const projectCheck = await dbQuery(
+        `SELECT id FROM projects WHERE id = ? ${wsProj.whereClause}`,
+        [project_id, ...wsProj.whereParams]
+      );
       if (projectCheck.length === 0) {
         return res.status(400).json({
           success: false,
@@ -330,8 +350,8 @@ router.post('/', authorizePermission('credentials', 'create'), validateCredentia
     const result = await dbQuery(
       `INSERT INTO credentials (
         title, client_id, project_id, credential_type, url, ip_address,
-        username, email, password, notes, created_by
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        username, email, password, notes, created_by, workspace_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         title,
         client_id || null,
@@ -343,7 +363,8 @@ router.post('/', authorizePermission('credentials', 'create'), validateCredentia
         email || null,
         encryptedPassword,
         notes || null,
-        req.user.id
+        req.user.id,
+        workspaceId || null
       ]
     );
 
@@ -361,8 +382,8 @@ router.post('/', authorizePermission('credentials', 'create'), validateCredentia
        LEFT JOIN clients cl ON c.client_id = cl.id
        LEFT JOIN projects p ON c.project_id = p.id
        LEFT JOIN users u ON c.created_by = u.id
-       WHERE c.id = ?`,
-      [credentialId]
+       WHERE c.id = ? ${getWorkspaceFilter(req, 'c', 'workspace_id').whereClause}`,
+      [credentialId, ...getWorkspaceFilter(req, 'c', 'workspace_id').whereParams]
     );
 
     const credential = credentials[0];
@@ -418,7 +439,11 @@ router.put('/:id', authorizePermission('credentials', 'edit'), [
     } = req.body;
 
     // Check if credential exists
-    const credentialCheck = await dbQuery('SELECT * FROM credentials WHERE id = ?', [credentialId]);
+    const ws = getWorkspaceFilter(req, '', 'workspace_id');
+    const credentialCheck = await dbQuery(
+      `SELECT * FROM credentials WHERE id = ? ${ws.whereClause}`,
+      [credentialId, ...ws.whereParams]
+    );
     if (credentialCheck.length === 0) {
       return res.status(404).json({
         success: false,
@@ -429,7 +454,11 @@ router.put('/:id', authorizePermission('credentials', 'edit'), [
     // Check if client exists (if provided)
     if (client_id !== undefined) {
       if (client_id) {
-        const clientCheck = await dbQuery('SELECT id FROM clients WHERE id = ?', [client_id]);
+        const wsCli = getWorkspaceFilter(req, '', 'workspace_id');
+        const clientCheck = await dbQuery(
+          `SELECT id FROM clients WHERE id = ? ${wsCli.whereClause}`,
+          [client_id, ...wsCli.whereParams]
+        );
         if (clientCheck.length === 0) {
           return res.status(400).json({
             success: false,
@@ -442,7 +471,11 @@ router.put('/:id', authorizePermission('credentials', 'edit'), [
     // Check if project exists (if provided)
     if (project_id !== undefined) {
       if (project_id) {
-        const projectCheck = await dbQuery('SELECT id FROM projects WHERE id = ?', [project_id]);
+        const wsProj = getWorkspaceFilter(req, '', 'workspace_id');
+        const projectCheck = await dbQuery(
+          `SELECT id FROM projects WHERE id = ? ${wsProj.whereClause}`,
+          [project_id, ...wsProj.whereParams]
+        );
         if (projectCheck.length === 0) {
           return res.status(400).json({
             success: false,
@@ -517,9 +550,10 @@ router.put('/:id', authorizePermission('credentials', 'edit'), [
 
     updateParams.push(credentialId);
 
+    const wsUpd = getWorkspaceFilter(req, '', 'workspace_id');
     await dbQuery(
-      `UPDATE credentials SET ${updates.join(', ')} WHERE id = ?`,
-      updateParams
+      `UPDATE credentials SET ${updates.join(', ')} WHERE id = ? ${wsUpd.whereClause}`,
+      [...updateParams, ...wsUpd.whereParams]
     );
 
     // Fetch updated credential
@@ -534,8 +568,8 @@ router.put('/:id', authorizePermission('credentials', 'edit'), [
        LEFT JOIN clients cl ON c.client_id = cl.id
        LEFT JOIN projects p ON c.project_id = p.id
        LEFT JOIN users u ON c.created_by = u.id
-       WHERE c.id = ?`,
-      [credentialId]
+       WHERE c.id = ? ${getWorkspaceFilter(req, 'c', 'workspace_id').whereClause}`,
+      [credentialId, ...getWorkspaceFilter(req, 'c', 'workspace_id').whereParams]
     );
 
     const credential = credentials[0];
@@ -563,7 +597,11 @@ router.delete('/:id', authorizePermission('credentials', 'delete'), async (req, 
     const credentialId = req.params.id;
 
     // Check if credential exists
-    const credentialCheck = await dbQuery('SELECT id FROM credentials WHERE id = ?', [credentialId]);
+    const wsDel = getWorkspaceFilter(req, '', 'workspace_id');
+    const credentialCheck = await dbQuery(
+      `SELECT id FROM credentials WHERE id = ? ${wsDel.whereClause}`,
+      [credentialId, ...wsDel.whereParams]
+    );
     if (credentialCheck.length === 0) {
       return res.status(404).json({
         success: false,
@@ -572,7 +610,8 @@ router.delete('/:id', authorizePermission('credentials', 'delete'), async (req, 
     }
 
     // Delete credential
-    await dbQuery('DELETE FROM credentials WHERE id = ?', [credentialId]);
+    const wsD = getWorkspaceFilter(req, '', 'workspace_id');
+    await dbQuery(`DELETE FROM credentials WHERE id = ? ${wsD.whereClause}`, [credentialId, ...wsD.whereParams]);
 
     res.json({
       success: true,

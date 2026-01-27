@@ -2,20 +2,21 @@ const jwt = require('jsonwebtoken');
 const { query } = require('../config/database');
 
 async function getUserByIdSafe(userId) {
-  // Some older DBs may not have users.client_id yet; fall back gracefully.
+  // Get user with all multi-tenant fields
   try {
     const users = await query(
-      `SELECT u.id, u.username, u.email, u.full_name, u.role, u.is_active, u.client_id
+      `SELECT u.id, u.username, u.email, u.full_name, u.role, u.is_active, u.client_id,
+              u.workspace_id, u.is_super_admin, u.email_verified
        FROM users u
        WHERE u.id = ?`,
       [userId]
     );
     return users;
   } catch (err) {
-    // ER_BAD_FIELD_ERROR if client_id column does not exist
+    // ER_BAD_FIELD_ERROR if columns don't exist (backward compatibility)
     if (err && (err.code === 'ER_BAD_FIELD_ERROR' || String(err.message || '').includes('Unknown column'))) {
       return await query(
-        `SELECT u.id, u.username, u.email, u.full_name, u.role, u.is_active
+        `SELECT u.id, u.username, u.email, u.full_name, u.role, u.is_active, u.client_id
          FROM users u
          WHERE u.id = ?`,
         [userId]
@@ -104,9 +105,43 @@ const authenticateToken = async (req, res, next) => {
       user.client_id = parseInt(user.client_id);
     }
 
-    // Add user and permissions to request object
+    // Get workspace context for multi-tenant support
+    let workspaceContext = null;
+    if (!user.is_super_admin && user.workspace_id) {
+      // Get workspace info
+      const workspaces = await query(
+        `SELECT id, name, slug, owner_id, plan_type, status 
+         FROM workspaces 
+         WHERE id = ? AND status = 'active'`,
+        [user.workspace_id]
+      );
+      if (workspaces.length > 0) {
+        workspaceContext = workspaces[0];
+      }
+    } else if (!user.is_super_admin) {
+      // User doesn't have workspace_id, try to get from workspace_members
+      const memberships = await query(
+        `SELECT w.id, w.name, w.slug, w.owner_id, w.plan_type, w.status, wm.role as workspace_role
+         FROM workspace_members wm
+         INNER JOIN workspaces w ON wm.workspace_id = w.id
+         WHERE wm.user_id = ? AND wm.status = 'active' AND w.status = 'active'
+         ORDER BY wm.joined_at DESC
+         LIMIT 1`,
+        [user.id]
+      );
+      if (memberships.length > 0) {
+        workspaceContext = memberships[0];
+        user.workspace_id = workspaceContext.id;
+      }
+    }
+
+    // Add user, permissions, and workspace context to request object
     req.user = user;
     req.user.permissions = permissions;
+    req.user.workspace = workspaceContext;
+    req.user.workspaceId = workspaceContext ? workspaceContext.id : null;
+    req.user.isSuperAdmin = user.is_super_admin === true || user.is_super_admin === 1;
+    
     next();
   } catch (error) {
     if (error.name === 'JsonWebTokenError') {
@@ -162,7 +197,12 @@ const authorizePermission = (module, action) => {
       });
     }
 
-    // Admin always has all permissions
+    // Super admin always has all permissions
+    if (req.user.is_super_admin || req.user.isSuperAdmin) {
+      return next();
+    }
+    
+    // Legacy: Admin role also has all permissions (backward compatibility)
     if (req.user.role === 'admin') {
       return next();
     }
@@ -193,7 +233,12 @@ const authorizeAnyPermission = (...permissions) => {
       });
     }
 
-    // Admin always has all permissions
+    // Super admin always has all permissions
+    if (req.user.is_super_admin || req.user.isSuperAdmin) {
+      return next();
+    }
+    
+    // Legacy: Admin role also has all permissions (backward compatibility)
     if (req.user.role === 'admin') {
       return next();
     }
@@ -222,10 +267,17 @@ const adminOnly = authorizeRoles('admin');
 // Manager and admin middleware
 const managerAndAdmin = authorizeRoles('admin', 'manager');
 
-// Generate JWT token
-const generateToken = (userId) => {
+// Generate JWT token with workspace context
+const generateToken = async (userId, workspaceId = null) => {
+  const payload = { userId };
+  
+  // Include workspace_id in token if not super admin
+  if (workspaceId) {
+    payload.workspaceId = workspaceId;
+  }
+  
   return jwt.sign(
-    { userId },
+    payload,
     process.env.JWT_SECRET,
     { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
   );

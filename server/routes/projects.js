@@ -3,10 +3,12 @@ const router = express.Router();
 const { authenticateToken, authorizeRoles, authorizePermission } = require('../middleware/auth');
 const { body, validationResult, query: validatorQuery } = require('express-validator');
 const { query: dbQuery } = require('../config/database');
-const { getClientFilter, canAccessClientData } = require('../utils/dataFiltering');
+const { getClientFilter, canAccessClientData, getWorkspaceFilter } = require('../utils/dataFiltering');
+const { workspaceContext } = require('../middleware/workspaceContext');
 
-// Apply authentication to all routes
+// Apply authentication + workspace context to all routes
 router.use(authenticateToken);
+router.use(workspaceContext);
 
 // Validation middleware
 const validateProject = [
@@ -112,6 +114,11 @@ router.get('/', authorizePermission('projects', 'view'), [
     let whereClause = 'WHERE 1=1';
     const whereParams = [];
 
+    // Add workspace filter (primary)
+    const workspaceFilter = getWorkspaceFilter(req, 'p', 'workspace_id');
+    whereClause += workspaceFilter.whereClause;
+    whereParams.push(...workspaceFilter.whereParams);
+
     // Add client filter for client role users
     const clientFilter = getClientFilter(req, 'p', 'client_id');
     whereClause += clientFilter.whereClause;
@@ -181,12 +188,15 @@ router.get('/', authorizePermission('projects', 'view'), [
     const totalPages = Math.ceil(total / limit);
 
     // Get filters for frontend
+    const filtersWorkspace = getWorkspaceFilter(req, '', 'workspace_id');
     const projectTypes = await dbQuery(
-      'SELECT DISTINCT type FROM projects WHERE type IS NOT NULL ORDER BY type'
+      `SELECT DISTINCT type FROM projects WHERE type IS NOT NULL ${filtersWorkspace.whereClause} ORDER BY type`,
+      filtersWorkspace.whereParams
     );
 
     const projectStatuses = await dbQuery(
-      'SELECT DISTINCT status FROM projects WHERE status IS NOT NULL ORDER BY status'
+      `SELECT DISTINCT status FROM projects WHERE status IS NOT NULL ${filtersWorkspace.whereClause} ORDER BY status`,
+      filtersWorkspace.whereParams
     );
 
     res.set({
@@ -225,6 +235,7 @@ router.get('/', authorizePermission('projects', 'view'), [
 // Get project statistics (must be before /:id route to avoid route matching conflicts)
 router.get('/stats/overview', authorizePermission('projects', 'view'), async (req, res) => {
   try {
+    const ws = getWorkspaceFilter(req, '', 'workspace_id');
     const stats = await dbQuery(`
       SELECT
         COUNT(*) as total_projects,
@@ -236,16 +247,18 @@ router.get('/stats/overview', authorizePermission('projects', 'view'), async (re
         SUM(CASE WHEN budget IS NOT NULL THEN budget ELSE 0 END) as total_budget,
         AVG(CASE WHEN budget IS NOT NULL THEN budget ELSE NULL END) as avg_budget
       FROM projects
-    `);
+      WHERE 1=1 ${ws.whereClause}
+    `, ws.whereParams);
 
     const typeStats = await dbQuery(`
       SELECT 
         type,
         COUNT(*) as count
       FROM projects
+      WHERE 1=1 ${ws.whereClause}
       GROUP BY type
       ORDER BY count DESC
-    `);
+    `, ws.whereParams);
 
     const recentProjects = await dbQuery(`
       SELECT 
@@ -254,9 +267,10 @@ router.get('/stats/overview', authorizePermission('projects', 'view'), async (re
         c.company_name as client_company
       FROM projects p
       LEFT JOIN clients c ON p.client_id = c.id
+      WHERE 1=1 ${getWorkspaceFilter(req, 'p', 'workspace_id').whereClause}
       ORDER BY p.created_at DESC
       LIMIT 5
-    `);
+    `, getWorkspaceFilter(req, 'p', 'workspace_id').whereParams);
 
     res.json({
       success: true,
@@ -280,6 +294,7 @@ router.get('/:id', authorizePermission('projects', 'view'), async (req, res) => 
   try {
     const projectId = req.params.id;
 
+    const ws = getWorkspaceFilter(req, 'p', 'workspace_id');
     const projects = await dbQuery(
       `SELECT 
         p.*,
@@ -302,8 +317,8 @@ router.get('/:id', authorizePermission('projects', 'view'), async (req, res) => 
          WHERE project_id IS NOT NULL
          GROUP BY project_id
        ) i ON p.id = i.project_id
-       WHERE p.id = ?`,
-      [projectId]
+       WHERE p.id = ? ${ws.whereClause}`,
+      [projectId, ...ws.whereParams]
     );
 
     if (projects.length === 0) {
@@ -327,8 +342,8 @@ router.get('/:id', authorizePermission('projects', 'view'), async (req, res) => 
     let invoices = [];
     try {
       const invoiceResult = await dbQuery(
-        'SELECT * FROM invoices WHERE project_id = ? ORDER BY created_at DESC LIMIT 10',
-        [projectId]
+        `SELECT * FROM invoices WHERE project_id = ? ${getWorkspaceFilter(req, '', 'workspace_id').whereClause} ORDER BY created_at DESC LIMIT 10`,
+        [projectId, ...getWorkspaceFilter(req, '', 'workspace_id').whereParams]
       );
       invoices = invoiceResult;
     } catch (error) {
@@ -414,7 +429,11 @@ router.post('/', authorizePermission('projects', 'create'), validateProject, asy
     const technologyStack = processTechnologyStack(tech_stack);
 
     // Check if client exists
-    const clientCheck = await dbQuery('SELECT id FROM clients WHERE id = ?', [client_id]);
+    const wsClients = getWorkspaceFilter(req, '', 'workspace_id');
+    const clientCheck = await dbQuery(
+      `SELECT id FROM clients WHERE id = ? ${wsClients.whereClause}`,
+      [client_id, ...wsClients.whereParams]
+    );
     if (clientCheck.length === 0) {
       return res.status(400).json({
         success: false,
@@ -423,11 +442,12 @@ router.post('/', authorizePermission('projects', 'create'), validateProject, asy
     }
 
     // Insert project
+    const wsProjects = getWorkspaceFilter(req, '', 'workspace_id');
     const result = await dbQuery(
       `INSERT INTO projects (
         title, client_id, type, status, description, technology_stack,
-        start_date, end_date, budget, admin_url, delivery_link, notes
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        start_date, end_date, budget, admin_url, delivery_link, notes, workspace_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         title, 
         client_id, 
@@ -440,7 +460,8 @@ router.post('/', authorizePermission('projects', 'create'), validateProject, asy
         budget, 
         admin_url, 
         delivery_link, 
-        notes
+        notes,
+        wsProjects.whereParams?.[0] ?? null
       ]
     );
 
@@ -454,8 +475,8 @@ router.post('/', authorizePermission('projects', 'create'), validateProject, asy
         c.company_name as client_company
        FROM projects p
        LEFT JOIN clients c ON p.client_id = c.id
-       WHERE p.id = ?`,
-      [projectId]
+       WHERE p.id = ? ${getWorkspaceFilter(req, 'p', 'workspace_id').whereClause}`,
+      [projectId, ...getWorkspaceFilter(req, 'p', 'workspace_id').whereParams]
     );
 
     res.status(201).json({
@@ -504,7 +525,11 @@ router.put('/:id', authorizePermission('projects', 'edit'), validateProject, asy
     const technologyStack = processTechnologyStack(tech_stack);
 
     // Check if project exists
-    const projectCheck = await dbQuery('SELECT id FROM projects WHERE id = ?', [projectId]);
+    const wsProj = getWorkspaceFilter(req, '', 'workspace_id');
+    const projectCheck = await dbQuery(
+      `SELECT id FROM projects WHERE id = ? ${wsProj.whereClause}`,
+      [projectId, ...wsProj.whereParams]
+    );
     if (projectCheck.length === 0) {
       return res.status(404).json({
         success: false,
@@ -513,7 +538,11 @@ router.put('/:id', authorizePermission('projects', 'edit'), validateProject, asy
     }
 
     // Check if client exists
-    const clientCheck = await dbQuery('SELECT id FROM clients WHERE id = ?', [client_id]);
+    const wsCli = getWorkspaceFilter(req, '', 'workspace_id');
+    const clientCheck = await dbQuery(
+      `SELECT id FROM clients WHERE id = ? ${wsCli.whereClause}`,
+      [client_id, ...wsCli.whereParams]
+    );
     if (clientCheck.length === 0) {
       return res.status(400).json({
         success: false,
@@ -522,12 +551,13 @@ router.put('/:id', authorizePermission('projects', 'edit'), validateProject, asy
     }
 
     // Update project
+    const wsUpdate = getWorkspaceFilter(req, '', 'workspace_id');
     await dbQuery(
       `UPDATE projects SET
         title = ?, client_id = ?, type = ?, status = ?, description = ?,
         technology_stack = ?, start_date = ?, end_date = ?, budget = ?,
         admin_url = ?, delivery_link = ?, notes = ?, updated_at = CURRENT_TIMESTAMP
-       WHERE id = ?`,
+       WHERE id = ? ${wsUpdate.whereClause}`,
       [
         title, 
         client_id, 
@@ -541,7 +571,8 @@ router.put('/:id', authorizePermission('projects', 'edit'), validateProject, asy
         admin_url, 
         delivery_link, 
         notes, 
-        projectId
+        projectId,
+        ...wsUpdate.whereParams
       ]
     );
 
@@ -553,8 +584,8 @@ router.put('/:id', authorizePermission('projects', 'edit'), validateProject, asy
         c.company_name as client_company
        FROM projects p
        LEFT JOIN clients c ON p.client_id = c.id
-       WHERE p.id = ?`,
-      [projectId]
+       WHERE p.id = ? ${getWorkspaceFilter(req, 'p', 'workspace_id').whereClause}`,
+      [projectId, ...getWorkspaceFilter(req, 'p', 'workspace_id').whereParams]
     );
 
     res.json({
@@ -577,7 +608,11 @@ router.delete('/:id', authorizePermission('projects', 'delete'), async (req, res
     const projectId = req.params.id;
 
     // Check if project exists
-    const projectCheck = await dbQuery('SELECT id FROM projects WHERE id = ?', [projectId]);
+    const ws = getWorkspaceFilter(req, '', 'workspace_id');
+    const projectCheck = await dbQuery(
+      `SELECT id FROM projects WHERE id = ? ${ws.whereClause}`,
+      [projectId, ...ws.whereParams]
+    );
     if (projectCheck.length === 0) {
       return res.status(404).json({
         success: false,
@@ -586,8 +621,15 @@ router.delete('/:id', authorizePermission('projects', 'delete'), async (req, res
     }
 
     // Check if project has related data
-    const invoiceCheck = await dbQuery('SELECT id FROM invoices WHERE project_id = ? LIMIT 1', [projectId]);
-    const quotationCheck = await dbQuery('SELECT id FROM quotations WHERE project_id = ? LIMIT 1', [projectId]);
+    const wsi = getWorkspaceFilter(req, '', 'workspace_id');
+    const invoiceCheck = await dbQuery(
+      `SELECT id FROM invoices WHERE project_id = ? ${wsi.whereClause} LIMIT 1`,
+      [projectId, ...wsi.whereParams]
+    );
+    const quotationCheck = await dbQuery(
+      `SELECT id FROM quotations WHERE project_id = ? ${wsi.whereClause} LIMIT 1`,
+      [projectId, ...wsi.whereParams]
+    );
 
     if (invoiceCheck.length > 0 || quotationCheck.length > 0) {
       return res.status(400).json({
@@ -596,7 +638,11 @@ router.delete('/:id', authorizePermission('projects', 'delete'), async (req, res
       });
     }
 
-    await dbQuery('DELETE FROM projects WHERE id = ?', [projectId]);
+    const wsd = getWorkspaceFilter(req, '', 'workspace_id');
+    await dbQuery(
+      `DELETE FROM projects WHERE id = ? ${wsd.whereClause}`,
+      [projectId, ...wsd.whereParams]
+    );
 
     res.json({
       success: true,

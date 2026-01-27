@@ -2,12 +2,14 @@ const express = require('express');
 const { authenticateToken, authorizePermission } = require('../middleware/auth');
 const { body, validationResult, query: validatorQuery } = require('express-validator');
 const { query: dbQuery } = require('../config/database');
-const { getClientFilter, canAccessClientData } = require('../utils/dataFiltering');
+const { getClientFilter, canAccessClientData, getWorkspaceFilter } = require('../utils/dataFiltering');
+const { workspaceContext } = require('../middleware/workspaceContext');
 
 const router = express.Router();
 
-// Apply authentication to all routes
+// Apply authentication + workspace context to all routes
 router.use(authenticateToken);
+router.use(workspaceContext);
 
 // Validation middleware
 const validateConversation = [
@@ -76,6 +78,11 @@ router.get('/', authorizePermission('conversations', 'view'), [
     // Build WHERE clause
     let whereClause = 'WHERE 1=1';
     const whereParams = [];
+
+    // Add workspace filter (primary)
+    const workspaceFilter = getWorkspaceFilter(req, 'c', 'workspace_id');
+    whereClause += workspaceFilter.whereClause;
+    whereParams.push(...workspaceFilter.whereParams);
 
     // Add client filter for client role users
     const clientFilter = getClientFilter(req, 'c', 'client_id');
@@ -182,6 +189,7 @@ router.get('/:id', authorizePermission('conversations', 'view'), async (req, res
   try {
     const conversationId = req.params.id;
 
+    const ws = getWorkspaceFilter(req, 'c', 'workspace_id');
     const conversations = await dbQuery(
       `SELECT 
         c.*,
@@ -195,8 +203,8 @@ router.get('/:id', authorizePermission('conversations', 'view'), async (req, res
        LEFT JOIN clients cl ON c.client_id = cl.id
        LEFT JOIN projects p ON c.project_id = p.id
        LEFT JOIN users u ON c.created_by = u.id
-       WHERE c.id = ?`,
-      [conversationId]
+       WHERE c.id = ? ${ws.whereClause}`,
+      [conversationId, ...ws.whereParams]
     );
 
     if (conversations.length === 0) {
@@ -252,8 +260,17 @@ router.post('/', authorizePermission('conversations', 'create'), validateConvers
       follow_up_date
     } = req.body;
 
+    const workspaceId = req.workspaceId || req.workspaceFilter?.value;
+    if (!workspaceId && !req.isSuperAdmin) {
+      return res.status(403).json({ success: false, message: 'Workspace context required' });
+    }
+
     // Check if client exists
-    const clientCheck = await dbQuery('SELECT id FROM clients WHERE id = ?', [client_id]);
+    const wsCli = getWorkspaceFilter(req, '', 'workspace_id');
+    const clientCheck = await dbQuery(
+      `SELECT id FROM clients WHERE id = ? ${wsCli.whereClause}`,
+      [client_id, ...wsCli.whereParams]
+    );
     if (clientCheck.length === 0) {
       return res.status(400).json({
         success: false,
@@ -263,7 +280,11 @@ router.post('/', authorizePermission('conversations', 'create'), validateConvers
 
     // Check if project exists (if provided)
     if (project_id) {
-      const projectCheck = await dbQuery('SELECT id FROM projects WHERE id = ?', [project_id]);
+      const wsProj = getWorkspaceFilter(req, '', 'workspace_id');
+      const projectCheck = await dbQuery(
+        `SELECT id FROM projects WHERE id = ? ${wsProj.whereClause}`,
+        [project_id, ...wsProj.whereParams]
+      );
       if (projectCheck.length === 0) {
         return res.status(400).json({
           success: false,
@@ -276,8 +297,8 @@ router.post('/', authorizePermission('conversations', 'create'), validateConvers
     const result = await dbQuery(
       `INSERT INTO conversations (
         client_id, project_id, conversation_type, subject, message,
-        direction, is_important, follow_up_date, created_by
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        direction, is_important, follow_up_date, created_by, workspace_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         client_id,
         project_id || null,
@@ -287,7 +308,8 @@ router.post('/', authorizePermission('conversations', 'create'), validateConvers
         direction,
         is_important || false,
         follow_up_date || null,
-        req.user.id
+        req.user.id,
+        workspaceId || null
       ]
     );
 
@@ -306,8 +328,8 @@ router.post('/', authorizePermission('conversations', 'create'), validateConvers
        LEFT JOIN clients cl ON c.client_id = cl.id
        LEFT JOIN projects p ON c.project_id = p.id
        LEFT JOIN users u ON c.created_by = u.id
-       WHERE c.id = ?`,
-      [conversationId]
+       WHERE c.id = ? ${getWorkspaceFilter(req, 'c', 'workspace_id').whereClause}`,
+      [conversationId, ...getWorkspaceFilter(req, 'c', 'workspace_id').whereParams]
     );
 
     res.status(201).json({
@@ -363,7 +385,11 @@ router.put('/:id', authorizePermission('conversations', 'edit'), [
     } = req.body;
 
     // Check if conversation exists
-    const conversationCheck = await dbQuery('SELECT * FROM conversations WHERE id = ?', [conversationId]);
+    const ws = getWorkspaceFilter(req, '', 'workspace_id');
+    const conversationCheck = await dbQuery(
+      `SELECT * FROM conversations WHERE id = ? ${ws.whereClause}`,
+      [conversationId, ...ws.whereParams]
+    );
     if (conversationCheck.length === 0) {
       return res.status(404).json({
         success: false,
@@ -373,7 +399,11 @@ router.put('/:id', authorizePermission('conversations', 'edit'), [
 
     // Check if client exists (if provided)
     if (client_id !== undefined) {
-      const clientCheck = await dbQuery('SELECT id FROM clients WHERE id = ?', [client_id]);
+      const wsCli = getWorkspaceFilter(req, '', 'workspace_id');
+      const clientCheck = await dbQuery(
+        `SELECT id FROM clients WHERE id = ? ${wsCli.whereClause}`,
+        [client_id, ...wsCli.whereParams]
+      );
       if (clientCheck.length === 0) {
         return res.status(400).json({
           success: false,
@@ -385,7 +415,11 @@ router.put('/:id', authorizePermission('conversations', 'edit'), [
     // Check if project exists (if provided)
     if (project_id !== undefined) {
       if (project_id) {
-        const projectCheck = await dbQuery('SELECT id FROM projects WHERE id = ?', [project_id]);
+        const wsProj = getWorkspaceFilter(req, '', 'workspace_id');
+        const projectCheck = await dbQuery(
+          `SELECT id FROM projects WHERE id = ? ${wsProj.whereClause}`,
+          [project_id, ...wsProj.whereParams]
+        );
         if (projectCheck.length === 0) {
           return res.status(400).json({
             success: false,
@@ -448,9 +482,10 @@ router.put('/:id', authorizePermission('conversations', 'edit'), [
 
     updateParams.push(conversationId);
 
+    const wsUpd = getWorkspaceFilter(req, '', 'workspace_id');
     await dbQuery(
-      `UPDATE conversations SET ${updates.join(', ')} WHERE id = ?`,
-      updateParams
+      `UPDATE conversations SET ${updates.join(', ')} WHERE id = ? ${wsUpd.whereClause}`,
+      [...updateParams, ...wsUpd.whereParams]
     );
 
     // Fetch updated conversation
@@ -466,8 +501,8 @@ router.put('/:id', authorizePermission('conversations', 'edit'), [
        LEFT JOIN clients cl ON c.client_id = cl.id
        LEFT JOIN projects p ON c.project_id = p.id
        LEFT JOIN users u ON c.created_by = u.id
-       WHERE c.id = ?`,
-      [conversationId]
+       WHERE c.id = ? ${getWorkspaceFilter(req, 'c', 'workspace_id').whereClause}`,
+      [conversationId, ...getWorkspaceFilter(req, 'c', 'workspace_id').whereParams]
     );
 
     res.json({
@@ -490,7 +525,11 @@ router.delete('/:id', authorizePermission('conversations', 'delete'), async (req
     const conversationId = req.params.id;
 
     // Check if conversation exists
-    const conversationCheck = await dbQuery('SELECT id FROM conversations WHERE id = ?', [conversationId]);
+    const wsDel = getWorkspaceFilter(req, '', 'workspace_id');
+    const conversationCheck = await dbQuery(
+      `SELECT id FROM conversations WHERE id = ? ${wsDel.whereClause}`,
+      [conversationId, ...wsDel.whereParams]
+    );
     if (conversationCheck.length === 0) {
       return res.status(404).json({
         success: false,
@@ -499,7 +538,8 @@ router.delete('/:id', authorizePermission('conversations', 'delete'), async (req
     }
 
     // Delete conversation
-    await dbQuery('DELETE FROM conversations WHERE id = ?', [conversationId]);
+    const wsD = getWorkspaceFilter(req, '', 'workspace_id');
+    await dbQuery(`DELETE FROM conversations WHERE id = ? ${wsD.whereClause}`, [conversationId, ...wsD.whereParams]);
 
     res.json({
       success: true,

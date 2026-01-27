@@ -25,6 +25,7 @@ import {
 import { useAuth } from '../../contexts/AuthContext';
 import { usePermissions } from '../../hooks/usePermissions';
 import { NAVIGATION_PERMISSIONS } from '../../utils/permissions';
+import WorkspaceDisplay from './WorkspaceDisplay';
 
 const Layout = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -139,10 +140,11 @@ const Layout = () => {
           </button>
 
           <div className="flex-1 px-4 flex justify-between">
-            <div className="flex-1 flex items-center">
+            <div className="flex-1 flex items-center space-x-4">
               <h1 className="text-2xl font-semibold text-gray-900">
                 Client Management System
               </h1>
+              <WorkspaceDisplay />
             </div>
 
             <div className="ml-4 flex items-center md:ml-6 space-x-4">

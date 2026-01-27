@@ -3,10 +3,12 @@ const router = express.Router();
 const { authenticateToken, authorizeRoles, authorizePermission } = require('../middleware/auth');
 const { body, validationResult, query: validatorQuery } = require('express-validator');
 const { query: dbQuery } = require('../config/database');
-const { getClientFilter, canAccessClientData } = require('../utils/dataFiltering');
+const { getClientFilter, canAccessClientData, getWorkspaceFilter } = require('../utils/dataFiltering');
+const { workspaceContext } = require('../middleware/workspaceContext');
 
-// Apply authentication to all routes
+// Apply authentication + workspace context to all routes
 router.use(authenticateToken);
+router.use(workspaceContext);
 
 // Validation middleware
 const validateInvoice = [
@@ -39,11 +41,12 @@ const validateInvoiceItem = [
 ];
 
 // Helper function to generate invoice number
-const generateInvoiceNumber = async () => {
+const generateInvoiceNumber = async (req) => {
   const year = new Date().getFullYear();
+  const ws = getWorkspaceFilter(req, '', 'workspace_id');
   const result = await dbQuery(
-    'SELECT COUNT(*) as count FROM invoices WHERE YEAR(created_at) = ?',
-    [year]
+    `SELECT COUNT(*) as count FROM invoices WHERE YEAR(created_at) = ? ${ws.whereClause}`,
+    [year, ...ws.whereParams]
   );
   const count = result[0].count + 1;
   return `INV-${year}-${count.toString().padStart(4, '0')}`;
@@ -162,6 +165,11 @@ router.get('/', authorizePermission('invoices', 'view'), [
     let whereClause = 'WHERE 1=1';
     const whereParams = [];
 
+    // Add workspace filter (primary)
+    const workspaceFilter = getWorkspaceFilter(req, 'i', 'workspace_id');
+    whereClause += workspaceFilter.whereClause;
+    whereParams.push(...workspaceFilter.whereParams);
+
     // Add client filter for client role users
     const clientFilter = getClientFilter(req, 'i', 'client_id');
     whereClause += clientFilter.whereClause;
@@ -234,8 +242,10 @@ router.get('/', authorizePermission('invoices', 'view'), [
     const totalPages = Math.ceil(total / limit);
 
     // Get filters for frontend
+    const wsFilters = getWorkspaceFilter(req, '', 'workspace_id');
     const invoiceStatuses = await dbQuery(
-      'SELECT DISTINCT status FROM invoices WHERE status IS NOT NULL ORDER BY status'
+      `SELECT DISTINCT status FROM invoices WHERE status IS NOT NULL ${wsFilters.whereClause} ORDER BY status`,
+      wsFilters.whereParams
     );
 
     res.set({
@@ -275,6 +285,7 @@ router.get('/:id', authorizePermission('invoices', 'view'), async (req, res) => 
   try {
     const invoiceId = req.params.id;
 
+    const ws = getWorkspaceFilter(req, 'i', 'workspace_id');
     const invoices = await dbQuery(
       `SELECT 
         i.*,
@@ -293,8 +304,8 @@ router.get('/:id', authorizePermission('invoices', 'view'), async (req, res) => 
        LEFT JOIN projects p ON i.project_id = p.id
        LEFT JOIN quotations qt ON i.quotation_id = qt.id
        LEFT JOIN users u ON i.created_by = u.id
-       WHERE i.id = ?`,
-      [invoiceId]
+       WHERE i.id = ? ${ws.whereClause}`,
+      [invoiceId, ...ws.whereParams]
     );
 
     if (invoices.length === 0) {
@@ -384,8 +395,17 @@ router.post('/', authorizePermission('invoices', 'create'), validateInvoice, asy
       items
     } = req.body;
 
+    const workspaceId = req.workspaceId || req.workspaceFilter?.value;
+    if (!workspaceId && !req.isSuperAdmin) {
+      return res.status(403).json({ success: false, message: 'Workspace context required' });
+    }
+
     // Check if client exists
-    const clientCheck = await dbQuery('SELECT id FROM clients WHERE id = ?', [client_id]);
+    const wsCli = getWorkspaceFilter(req, '', 'workspace_id');
+    const clientCheck = await dbQuery(
+      `SELECT id FROM clients WHERE id = ? ${wsCli.whereClause}`,
+      [client_id, ...wsCli.whereParams]
+    );
     if (clientCheck.length === 0) {
       return res.status(400).json({
         success: false,
@@ -395,12 +415,28 @@ router.post('/', authorizePermission('invoices', 'create'), validateInvoice, asy
 
     // Check if project exists (if provided)
     if (project_id) {
-      const projectCheck = await dbQuery('SELECT id FROM projects WHERE id = ?', [project_id]);
+      const wsProj = getWorkspaceFilter(req, '', 'workspace_id');
+      const projectCheck = await dbQuery(
+        `SELECT id FROM projects WHERE id = ? ${wsProj.whereClause}`,
+        [project_id, ...wsProj.whereParams]
+      );
       if (projectCheck.length === 0) {
         return res.status(400).json({
           success: false,
           message: 'Project not found'
         });
+      }
+    }
+
+    // Check if quotation exists (if provided)
+    if (quotation_id) {
+      const wsQt = getWorkspaceFilter(req, '', 'workspace_id');
+      const quotationCheck = await dbQuery(
+        `SELECT id FROM quotations WHERE id = ? ${wsQt.whereClause}`,
+        [quotation_id, ...wsQt.whereParams]
+      );
+      if (quotationCheck.length === 0) {
+        return res.status(400).json({ success: false, message: 'Quotation not found' });
       }
     }
 
@@ -416,7 +452,7 @@ router.post('/', authorizePermission('invoices', 'create'), validateInvoice, asy
     }
 
     // Generate invoice number if not provided
-    const finalInvoiceNumber = invoice_number || await generateInvoiceNumber();
+    const finalInvoiceNumber = invoice_number || await generateInvoiceNumber(req);
 
     // Calculate totals if not provided
     let finalSubtotal = subtotal;
@@ -434,12 +470,12 @@ router.post('/', authorizePermission('invoices', 'create'), validateInvoice, asy
     const result = await dbQuery(
       `INSERT INTO invoices (
         invoice_number, quotation_id, client_id, project_id, invoice_date, due_date,
-        status, subtotal, tax_rate, tax_amount, total_amount, currency, notes, created_by
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        status, subtotal, tax_rate, tax_amount, total_amount, currency, notes, created_by, workspace_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         finalInvoiceNumber, quotation_id, client_id, project_id, invoice_date, due_date,
         status, finalSubtotal, tax_rate || 0, finalTaxAmount, finalTotalAmount, currency || 'USD',
-        notes, req.user.id
+        notes, req.user.id, workspaceId || null
       ]
     );
 
@@ -474,8 +510,8 @@ router.post('/', authorizePermission('invoices', 'create'), validateInvoice, asy
        FROM invoices i
        LEFT JOIN clients c ON i.client_id = c.id
        LEFT JOIN projects p ON i.project_id = p.id
-       WHERE i.id = ?`,
-      [invoiceId]
+       WHERE i.id = ? ${getWorkspaceFilter(req, 'i', 'workspace_id').whereClause}`,
+      [invoiceId, ...getWorkspaceFilter(req, 'i', 'workspace_id').whereParams]
     );
 
     res.status(201).json({
@@ -522,8 +558,12 @@ router.put('/:id', authorizePermission('invoices', 'edit'), validateInvoice, asy
       items
     } = req.body;
 
-    // Check if invoice exists
-    const invoiceCheck = await dbQuery('SELECT id FROM invoices WHERE id = ?', [invoiceId]);
+    // Check if invoice exists (scoped to workspace)
+    const wsInv = getWorkspaceFilter(req, '', 'workspace_id');
+    const invoiceCheck = await dbQuery(
+      `SELECT id FROM invoices WHERE id = ? ${wsInv.whereClause}`,
+      [invoiceId, ...wsInv.whereParams]
+    );
     if (invoiceCheck.length === 0) {
       return res.status(404).json({
         success: false,
@@ -532,7 +572,11 @@ router.put('/:id', authorizePermission('invoices', 'edit'), validateInvoice, asy
     }
 
     // Check if client exists
-    const clientCheck = await dbQuery('SELECT id FROM clients WHERE id = ?', [client_id]);
+    const wsCli = getWorkspaceFilter(req, '', 'workspace_id');
+    const clientCheck = await dbQuery(
+      `SELECT id FROM clients WHERE id = ? ${wsCli.whereClause}`,
+      [client_id, ...wsCli.whereParams]
+    );
     if (clientCheck.length === 0) {
       return res.status(400).json({
         success: false,
@@ -542,7 +586,11 @@ router.put('/:id', authorizePermission('invoices', 'edit'), validateInvoice, asy
 
     // Check if project exists (if provided)
     if (project_id) {
-      const projectCheck = await dbQuery('SELECT id FROM projects WHERE id = ?', [project_id]);
+      const wsProj = getWorkspaceFilter(req, '', 'workspace_id');
+      const projectCheck = await dbQuery(
+        `SELECT id FROM projects WHERE id = ? ${wsProj.whereClause}`,
+        [project_id, ...wsProj.whereParams]
+      );
       if (projectCheck.length === 0) {
         return res.status(400).json({
           success: false,
@@ -553,7 +601,11 @@ router.put('/:id', authorizePermission('invoices', 'edit'), validateInvoice, asy
 
     // Check if quotation exists (if provided)
     if (quotation_id) {
-      const quotationCheck = await dbQuery('SELECT id FROM quotations WHERE id = ?', [quotation_id]);
+      const wsQt = getWorkspaceFilter(req, '', 'workspace_id');
+      const quotationCheck = await dbQuery(
+        `SELECT id FROM quotations WHERE id = ? ${wsQt.whereClause}`,
+        [quotation_id, ...wsQt.whereParams]
+      );
       if (quotationCheck.length === 0) {
         return res.status(400).json({
           success: false,
@@ -575,16 +627,17 @@ router.put('/:id', authorizePermission('invoices', 'edit'), validateInvoice, asy
     }
 
     // Update invoice
+    const wsUpd = getWorkspaceFilter(req, '', 'workspace_id');
     await dbQuery(
       `UPDATE invoices SET
         invoice_number = ?, quotation_id = ?, client_id = ?, project_id = ?, invoice_date = ?, due_date = ?,
         status = ?, subtotal = ?, tax_rate = ?, tax_amount = ?, total_amount = ?, currency = ?,
         notes = ?, updated_at = CURRENT_TIMESTAMP
-       WHERE id = ?`,
+       WHERE id = ? ${wsUpd.whereClause}`,
       [
         invoice_number, quotation_id, client_id, project_id, invoice_date, due_date,
         status, finalSubtotal, tax_rate || 0, finalTaxAmount, finalTotalAmount, currency || 'USD',
-        notes, invoiceId
+        notes, invoiceId, ...wsUpd.whereParams
       ]
     );
 
@@ -624,8 +677,8 @@ router.put('/:id', authorizePermission('invoices', 'edit'), validateInvoice, asy
        FROM invoices i
        LEFT JOIN clients c ON i.client_id = c.id
        LEFT JOIN projects p ON i.project_id = p.id
-       WHERE i.id = ?`,
-      [invoiceId]
+       WHERE i.id = ? ${getWorkspaceFilter(req, 'i', 'workspace_id').whereClause}`,
+      [invoiceId, ...getWorkspaceFilter(req, 'i', 'workspace_id').whereParams]
     );
 
     res.json({
@@ -669,8 +722,12 @@ router.post('/:id/payment', authorizePermission('invoices', 'record_payment'), [
       notes
     } = req.body;
 
-    // Check if invoice exists
-    const invoiceCheck = await dbQuery('SELECT * FROM invoices WHERE id = ?', [invoiceId]);
+    // Check if invoice exists (scoped to workspace)
+    const wsInv = getWorkspaceFilter(req, '', 'workspace_id');
+    const invoiceCheck = await dbQuery(
+      `SELECT * FROM invoices WHERE id = ? ${wsInv.whereClause}`,
+      [invoiceId, ...wsInv.whereParams]
+    );
     if (invoiceCheck.length === 0) {
       return res.status(404).json({
         success: false,
@@ -679,6 +736,14 @@ router.post('/:id/payment', authorizePermission('invoices', 'record_payment'), [
     }
 
     const invoice = invoiceCheck[0];
+
+    // Check if client user can access this invoice's data
+    if (!canAccessClientData(req, invoice.client_id)) {
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied. You can only manage payments for your own invoices.'
+      });
+    }
 
     // Validate payment amount
     const currentPaidAmount = parseFloat(invoice.paid_amount) || 0;
@@ -734,9 +799,10 @@ router.post('/:id/payment', authorizePermission('invoices', 'record_payment'), [
     // Ensure paid amount doesn't exceed total amount (safety check)
     const finalPaidAmount = Math.min(newPaidAmount, totalAmount);
     
+    const wsPaid = getWorkspaceFilter(req, '', 'workspace_id');
     await dbQuery(
-      'UPDATE invoices SET paid_amount = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-      [finalPaidAmount, invoiceId]
+      `UPDATE invoices SET paid_amount = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? ${wsPaid.whereClause}`,
+      [finalPaidAmount, invoiceId, ...wsPaid.whereParams]
     );
 
     // Update invoice status
@@ -760,8 +826,8 @@ router.post('/:id/payment', authorizePermission('invoices', 'record_payment'), [
        LEFT JOIN projects p ON i.project_id = p.id
        LEFT JOIN quotations qt ON i.quotation_id = qt.id
        LEFT JOIN users u ON i.created_by = u.id
-       WHERE i.id = ?`,
-      [invoiceId]
+       WHERE i.id = ? ${getWorkspaceFilter(req, 'i', 'workspace_id').whereClause}`,
+      [invoiceId, ...getWorkspaceFilter(req, 'i', 'workspace_id').whereParams]
     );
 
     res.status(201).json({
@@ -788,8 +854,12 @@ router.delete('/:id', authorizePermission('invoices', 'delete'), async (req, res
   try {
     const invoiceId = req.params.id;
 
-    // Check if invoice exists
-    const invoiceCheck = await dbQuery('SELECT id FROM invoices WHERE id = ?', [invoiceId]);
+    // Check if invoice exists (scoped to workspace)
+    const wsDel = getWorkspaceFilter(req, '', 'workspace_id');
+    const invoiceCheck = await dbQuery(
+      `SELECT id FROM invoices WHERE id = ? ${wsDel.whereClause}`,
+      [invoiceId, ...wsDel.whereParams]
+    );
     if (invoiceCheck.length === 0) {
       return res.status(404).json({
         success: false,
@@ -810,7 +880,8 @@ router.delete('/:id', authorizePermission('invoices', 'delete'), async (req, res
     await dbQuery('DELETE FROM invoice_items WHERE invoice_id = ?', [invoiceId]);
 
     // Delete invoice
-    await dbQuery('DELETE FROM invoices WHERE id = ?', [invoiceId]);
+    const wsD = getWorkspaceFilter(req, '', 'workspace_id');
+    await dbQuery(`DELETE FROM invoices WHERE id = ? ${wsD.whereClause}`, [invoiceId, ...wsD.whereParams]);
 
     res.json({
       success: true,
@@ -826,8 +897,9 @@ router.delete('/:id', authorizePermission('invoices', 'delete'), async (req, res
 });
 
 // Get invoice statistics
-router.get('/stats/overview', async (req, res) => {
+router.get('/stats/overview', authorizePermission('invoices', 'view'), async (req, res) => {
   try {
+    const ws = getWorkspaceFilter(req, '', 'workspace_id');
     const stats = await dbQuery(`
       SELECT
         COUNT(*) as total_invoices,
@@ -842,7 +914,8 @@ router.get('/stats/overview', async (req, res) => {
         SUM(total_amount - paid_amount) as total_outstanding,
         AVG(total_amount) as avg_invoice_amount
       FROM invoices
-    `);
+      WHERE 1=1 ${ws.whereClause}
+    `, ws.whereParams);
 
     const recentInvoices = await dbQuery(`
       SELECT 
@@ -851,9 +924,10 @@ router.get('/stats/overview', async (req, res) => {
         c.company_name as client_company
       FROM invoices i
       LEFT JOIN clients c ON i.client_id = c.id
+      WHERE 1=1 ${getWorkspaceFilter(req, 'i', 'workspace_id').whereClause}
       ORDER BY i.created_at DESC
       LIMIT 5
-    `);
+    `, getWorkspaceFilter(req, 'i', 'workspace_id').whereParams);
 
     const overdueInvoices = await dbQuery(`
       SELECT 
@@ -862,10 +936,11 @@ router.get('/stats/overview', async (req, res) => {
         c.company_name as client_company
       FROM invoices i
       LEFT JOIN clients c ON i.client_id = c.id
-      WHERE i.due_date < CURDATE() AND i.status NOT IN ('paid', 'cancelled')
+      WHERE 1=1 ${getWorkspaceFilter(req, 'i', 'workspace_id').whereClause}
+        AND i.due_date < CURDATE() AND i.status NOT IN ('paid', 'cancelled')
       ORDER BY i.due_date ASC
       LIMIT 10
-    `);
+    `, getWorkspaceFilter(req, 'i', 'workspace_id').whereParams);
 
     res.json({
       success: true,
@@ -891,6 +966,7 @@ router.get('/:id/download', authorizePermission('invoices', 'view'), async (req,
     const PDFDocument = require('pdfkit');
 
     // Fetch invoice data
+    const ws = getWorkspaceFilter(req, 'i', 'workspace_id');
     const invoices = await dbQuery(
       `SELECT 
         i.*,
@@ -911,8 +987,8 @@ router.get('/:id/download', authorizePermission('invoices', 'view'), async (req,
        LEFT JOIN projects p ON i.project_id = p.id
        LEFT JOIN quotations qt ON i.quotation_id = qt.id
        LEFT JOIN users u ON i.created_by = u.id
-       WHERE i.id = ?`,
-      [invoiceId]
+       WHERE i.id = ? ${ws.whereClause}`,
+      [invoiceId, ...ws.whereParams]
     );
 
     if (invoices.length === 0) {

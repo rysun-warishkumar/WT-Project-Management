@@ -64,11 +64,17 @@ const TaskModal = ({ isOpen, onClose, userStory, task = null, parentTask = null,
   }, [task, isOpen]);
 
   const createMutation = useMutation(
-    (data) => pmAPI.createTask({
-      ...data,
-      user_story_id: userStory.id,
-      parent_task_id: parentTask ? parentTask.id : null,
-    }),
+    (data) => {
+      const taskData = {
+        ...data,
+        user_story_id: userStory.id,
+      };
+      // Only include parent_task_id if parentTask exists
+      if (parentTask && parentTask.id) {
+        taskData.parent_task_id = parentTask.id;
+      }
+      return pmAPI.createTask(taskData);
+    },
     {
       onSuccess: () => {
         toast.success('Task created successfully');

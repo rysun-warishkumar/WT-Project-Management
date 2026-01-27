@@ -3,7 +3,7 @@ import axios from 'axios';
 // Create axios instance
 const api = axios.create({
   baseURL: process.env.REACT_APP_API_URL || 'http://localhost:5000/api',
-  timeout: 10000,
+  timeout: 30000, // Increased timeout for registration (email sending can take time)
 });
 
 // Request interceptor to add auth token
@@ -35,6 +35,9 @@ api.interceptors.response.use(
 // Auth API
 export const authAPI = {
   login: (credentials) => api.post('/auth/login', credentials),
+  register: (data) => api.post('/auth/register', data),
+  verifyEmail: (token) => api.get('/auth/verify-email', { params: { token } }),
+  resendVerification: (email) => api.post('/auth/resend-verification', { email }),
   logout: () => api.post('/auth/logout'),
   getProfile: () => api.get('/auth/profile'),
   updateProfile: (data) => api.put('/auth/profile', data),
@@ -211,7 +214,7 @@ export const pmAPI = {
   addWorkspaceMember: (workspaceId, data) => api.post(`/pm/settings/workspace/${workspaceId}/members`, data),
   updateWorkspaceMember: (workspaceId, memberId, data) => api.put(`/pm/settings/workspace/${workspaceId}/members/${memberId}`, data),
   removeWorkspaceMember: (workspaceId, memberId) => api.delete(`/pm/settings/workspace/${workspaceId}/members/${memberId}`),
-  getUsersForWorkspace: (search) => api.get('/pm/settings/users', { params: { search } }),
+  getUsersForWorkspace: (workspaceId, search) => api.get('/pm/settings/users', { params: { workspace_id: workspaceId, search } }),
   // Epics
   getEpics: (workspaceId, params) => api.get(`/pm/epics/workspace/${workspaceId}`, { params }),
   getEpicById: (id) => api.get(`/pm/epics/${id}`),
@@ -265,6 +268,13 @@ export const pmAPI = {
   assignUserStory: (storyId, assigneeId) => api.post(`/pm/assignments/user-stories/${storyId}/assign`, { assignee_id: assigneeId }),
   assignTask: (taskId, assigneeId) => api.post(`/pm/assignments/tasks/${taskId}/assign`, { assignee_id: assigneeId }),
   getAssignmentHistory: (entityType, entityId) => api.get(`/pm/assignments/history/${entityType}/${entityId}`),
+};
+
+// Settings API
+export const settingsAPI = {
+  getSettings: () => api.get('/settings'),
+  updateSmtpSettings: (data) => api.put('/settings/smtp', data),
+  testSmtpConnection: (data) => api.post('/settings/smtp/test', data),
 };
 
 export default api;

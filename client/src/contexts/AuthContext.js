@@ -94,7 +94,7 @@ export const AuthProvider = ({ children }) => {
     
     try {
       const response = await authAPI.login(credentials);
-      const { user, token } = response.data.data;
+      const { user, token, workspace } = response.data.data;
       
       // Fetch user permissions after login
       let userWithPermissions = user;
@@ -104,9 +104,17 @@ export const AuthProvider = ({ children }) => {
         if (!userWithPermissions.permissions) {
           userWithPermissions.permissions = [];
         }
+        // Preserve workspace info from login response if not in profile
+        if (workspace && !userWithPermissions.workspace) {
+          userWithPermissions.workspace = workspace;
+        }
       } catch (profileError) {
         console.error('Failed to fetch permissions:', profileError);
         userWithPermissions.permissions = [];
+        // Preserve workspace info from login response
+        if (workspace) {
+          userWithPermissions.workspace = workspace;
+        }
       }
       
       localStorage.setItem('token', token);
@@ -122,6 +130,7 @@ export const AuthProvider = ({ children }) => {
       return {
         success: false,
         error: error.response?.data?.message || 'Login failed',
+        requiresVerification: error.response?.data?.requiresVerification || false,
       };
     }
   };

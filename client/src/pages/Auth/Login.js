@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useForm } from 'react-hook-form';
+import { Link } from 'react-router-dom';
 import { Eye, EyeOff, Lock, User } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import toast from 'react-hot-toast';
@@ -24,10 +25,31 @@ const Login = () => {
       if (result.success) {
         toast.success('Login successful!');
       } else {
-        toast.error(result.error || 'Login failed');
+        // Handle email verification requirement
+        if (result.requiresVerification) {
+          toast.error(result.error || 'Please verify your email address before logging in.', {
+            duration: 6000,
+          });
+        } else {
+          toast.error(result.error || 'Login failed');
+        }
       }
     } catch (error) {
-      toast.error('An unexpected error occurred');
+      console.error('Login error:', error);
+      
+      // Handle email verification requirement from API
+      if (error.response?.data?.requiresVerification) {
+        toast.error(
+          error.response.data.message || 'Please verify your email address before logging in.',
+          { duration: 6000 }
+        );
+      } else {
+        toast.error(
+          error.response?.data?.message || 
+          'Login failed. Please check your credentials.' ||
+          'An unexpected error occurred'
+        );
+      }
     } finally {
       setIsLoading(false);
     }
@@ -160,22 +182,34 @@ const Login = () => {
           </form>
 
           {/* Demo Credentials */}
-          <div className="mt-6 p-4 bg-gray-50 rounded-md">
+          {/* <div className="mt-6 p-4 bg-gray-50 rounded-md">
             <h3 className="text-sm font-medium text-gray-900 mb-2">Demo Credentials:</h3>
             <div className="text-xs text-gray-600 space-y-1">
               <p><strong>Username:</strong> admin</p>
               <p><strong>Password:</strong> password</p>
             </div>
-          </div>
+          </div> */}
         </div>
 
         {/* Footer */}
-        <div className="text-center">
+        <div className="text-center space-y-2">
           <p className="text-sm text-gray-600">
             Don't have an account?{' '}
-            <a href="#" className="font-medium text-primary-600 hover:text-primary-500">
-              Contact administrator
-            </a>
+            <Link
+              to="/register"
+              className="font-medium text-primary-600 hover:text-primary-500"
+            >
+              Create an account
+            </Link>
+          </p>
+          <p className="text-sm text-gray-600">
+            Need to verify your email?{' '}
+            <Link
+              to="/resend-verification"
+              className="font-medium text-primary-600 hover:text-primary-500"
+            >
+              Resend verification
+            </Link>
           </p>
         </div>
       </div>

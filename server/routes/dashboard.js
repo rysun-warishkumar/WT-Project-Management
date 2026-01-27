@@ -1,36 +1,45 @@
 const express = require('express');
 const { authenticateToken, authorizePermission } = require('../middleware/auth');
 const { query } = require('../config/database');
+const { getWorkspaceFilter } = require('../utils/dataFiltering');
+const { workspaceContext } = require('../middleware/workspaceContext');
 
 const router = express.Router();
 
-// Apply authentication to all routes
+// Apply authentication + workspace context to all routes
 router.use(authenticateToken);
+router.use(workspaceContext);
 
 // Get dashboard overview
 router.get('/overview', authorizePermission('dashboard', 'view'), async (req, res) => {
   try {
+    const workspaceId = req.workspaceId || req.workspaceFilter?.value;
+    const isSuperAdmin = req.isSuperAdmin === true;
+    const wsClause = isSuperAdmin ? '' : ' AND workspace_id = ?';
+    const wsOnlyClause = isSuperAdmin ? '' : ' WHERE workspace_id = ?';
+    const repeat = (n) => (isSuperAdmin ? [] : Array(n).fill(workspaceId));
+
     // Get basic statistics
     const stats = await query(`
       SELECT 
-        (SELECT COUNT(*) FROM clients WHERE status = 'active') as active_clients,
-        (SELECT COUNT(*) FROM clients) as total_clients,
-        (SELECT COUNT(*) FROM projects WHERE status = 'in_progress') as active_projects,
-        (SELECT COUNT(*) FROM projects) as total_projects,
-        (SELECT COUNT(*) FROM quotations WHERE status IN ('draft', 'sent')) as pending_quotations,
-        (SELECT COUNT(*) FROM quotations) as total_quotations,
-        (SELECT COUNT(*) FROM invoices WHERE status IN ('sent', 'partial', 'overdue')) as unpaid_invoices,
-        (SELECT COUNT(*) FROM invoices) as total_invoices,
-        (SELECT COUNT(*) FROM projects WHERE status = 'completed') as completed_projects,
-        (SELECT COUNT(*) FROM clients WHERE onboarding_date >= DATE_SUB(NOW(), INTERVAL 30 DAY)) as new_clients_month,
-        (SELECT COUNT(*) FROM files) as total_files,
-        (SELECT COUNT(*) FROM credentials) as total_credentials,
-        (SELECT COUNT(*) FROM conversations) as total_conversations,
-        (SELECT COUNT(*) FROM users WHERE is_active = 1) as active_users,
-        (SELECT COUNT(*) FROM users) as total_users,
-        (SELECT SUM(total_amount) FROM invoices WHERE status = 'paid') as total_revenue,
-        (SELECT SUM(total_amount - paid_amount) FROM invoices WHERE status IN ('sent', 'partial', 'overdue')) as outstanding_amount
-    `);
+        (SELECT COUNT(*) FROM clients WHERE status = 'active'${wsClause}) as active_clients,
+        (SELECT COUNT(*) FROM clients WHERE 1=1${wsClause}) as total_clients,
+        (SELECT COUNT(*) FROM projects WHERE status = 'in_progress'${wsClause}) as active_projects,
+        (SELECT COUNT(*) FROM projects WHERE 1=1${wsClause}) as total_projects,
+        (SELECT COUNT(*) FROM quotations WHERE status IN ('draft', 'sent')${wsClause}) as pending_quotations,
+        (SELECT COUNT(*) FROM quotations WHERE 1=1${wsClause}) as total_quotations,
+        (SELECT COUNT(*) FROM invoices WHERE status IN ('sent', 'partial', 'overdue')${wsClause}) as unpaid_invoices,
+        (SELECT COUNT(*) FROM invoices WHERE 1=1${wsClause}) as total_invoices,
+        (SELECT COUNT(*) FROM projects WHERE status = 'completed'${wsClause}) as completed_projects,
+        (SELECT COUNT(*) FROM clients WHERE onboarding_date >= DATE_SUB(NOW(), INTERVAL 30 DAY)${wsClause}) as new_clients_month,
+        (SELECT COUNT(*) FROM files WHERE 1=1${wsClause}) as total_files,
+        (SELECT COUNT(*) FROM credentials WHERE 1=1${wsClause}) as total_credentials,
+        (SELECT COUNT(*) FROM conversations WHERE 1=1${wsClause}) as total_conversations,
+        (SELECT COUNT(*) FROM users WHERE is_active = 1${wsClause}) as active_users,
+        (SELECT COUNT(*) FROM users WHERE 1=1${wsClause}) as total_users,
+        (SELECT SUM(total_amount) FROM invoices WHERE status = 'paid'${wsClause}) as total_revenue,
+        (SELECT SUM(total_amount - paid_amount) FROM invoices WHERE status IN ('sent', 'partial', 'overdue')${wsClause}) as outstanding_amount
+    `, repeat(17));
 
     // Get recent activities
     const recentActivities = await query(`
@@ -40,7 +49,7 @@ router.get('/overview', authorizePermission('dashboard', 'view'), async (req, re
         'New client added' as description,
         c.created_at as date
       FROM clients c
-      WHERE c.created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)
+      WHERE c.created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)${isSuperAdmin ? '' : ' AND c.workspace_id = ?'}
       
       UNION ALL
       
@@ -50,7 +59,7 @@ router.get('/overview', authorizePermission('dashboard', 'view'), async (req, re
         CONCAT('Project status changed to ', p.status) as description,
         p.updated_at as date
       FROM projects p
-      WHERE p.updated_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)
+      WHERE p.updated_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)${isSuperAdmin ? '' : ' AND p.workspace_id = ?'}
       
       UNION ALL
       
@@ -60,11 +69,11 @@ router.get('/overview', authorizePermission('dashboard', 'view'), async (req, re
         CONCAT('Invoice ', i.status) as description,
         i.created_at as date
       FROM invoices i
-      WHERE i.created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)
+      WHERE i.created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)${isSuperAdmin ? '' : ' AND i.workspace_id = ?'}
       
       ORDER BY date DESC
       LIMIT 5
-    `);
+    `, repeat(3));
 
     // Get upcoming due dates
     const upcomingDueDates = await query(`
@@ -79,6 +88,7 @@ router.get('/overview', authorizePermission('dashboard', 'view'), async (req, re
       JOIN clients c ON i.client_id = c.id
       WHERE i.due_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 7 DAY)
         AND i.status IN ('sent', 'partial')
+        ${isSuperAdmin ? '' : ' AND i.workspace_id = ?'}
       
       UNION ALL
       
@@ -93,10 +103,11 @@ router.get('/overview', authorizePermission('dashboard', 'view'), async (req, re
       JOIN clients c ON q.client_id = c.id
       WHERE q.valid_till_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 7 DAY)
         AND q.status = 'sent'
+        ${isSuperAdmin ? '' : ' AND q.workspace_id = ?'}
       
       ORDER BY due_date ASC
       LIMIT 10
-    `);
+    `, repeat(2));
 
     // Get project status distribution
     const projectStatusDistribution = await query(`
@@ -104,9 +115,10 @@ router.get('/overview', authorizePermission('dashboard', 'view'), async (req, re
         status,
         COUNT(*) as count
       FROM projects
+      WHERE 1=1${wsClause}
       GROUP BY status
       ORDER BY count DESC
-    `);
+    `, repeat(1));
 
     // Get monthly revenue (last 6 months) - from invoice dates
     const monthlyRevenue = await query(`
@@ -117,10 +129,11 @@ router.get('/overview', authorizePermission('dashboard', 'view'), async (req, re
         COUNT(*) as invoice_count
       FROM invoices
       WHERE invoice_date >= DATE_SUB(NOW(), INTERVAL 6 MONTH)
+        ${isSuperAdmin ? '' : ' AND workspace_id = ?'}
       GROUP BY DATE_FORMAT(invoice_date, '%Y-%m'), DATE_FORMAT(invoice_date, '%M %Y')
       ORDER BY month DESC
       LIMIT 6
-    `);
+    `, repeat(1));
 
     // Get top clients by project count
     const topClients = await query(`
@@ -130,11 +143,12 @@ router.get('/overview', authorizePermission('dashboard', 'view'), async (req, re
         COUNT(p.id) as project_count,
         SUM(CASE WHEN p.status = 'completed' THEN 1 ELSE 0 END) as completed_projects
       FROM clients c
-      LEFT JOIN projects p ON c.id = p.client_id
+      LEFT JOIN projects p ON c.id = p.client_id${isSuperAdmin ? '' : ' AND p.workspace_id = ?'}
+      WHERE 1=1${isSuperAdmin ? '' : ' AND c.workspace_id = ?'}
       GROUP BY c.id, c.full_name, c.company_name
       ORDER BY project_count DESC
       LIMIT 5
-    `);
+    `, isSuperAdmin ? [] : [workspaceId, workspaceId]);
 
     res.json({
       success: true,
@@ -159,15 +173,20 @@ router.get('/overview', authorizePermission('dashboard', 'view'), async (req, re
 // Get quick stats
 router.get('/quick-stats', authorizePermission('dashboard', 'view'), async (req, res) => {
   try {
+    const workspaceId = req.workspaceId || req.workspaceFilter?.value;
+    const isSuperAdmin = req.isSuperAdmin === true;
+    const wsClause = isSuperAdmin ? '' : ' AND workspace_id = ?';
+    const repeat = (n) => (isSuperAdmin ? [] : Array(n).fill(workspaceId));
+
     const quickStats = await query(`
       SELECT 
-        (SELECT COUNT(*) FROM clients) as total_clients,
-        (SELECT COUNT(*) FROM projects) as total_projects,
-        (SELECT COUNT(*) FROM quotations) as total_quotations,
-        (SELECT COUNT(*) FROM invoices) as total_invoices,
-        (SELECT SUM(total_amount) FROM invoices WHERE status = 'paid') as total_revenue,
-        (SELECT SUM(total_amount) FROM invoices WHERE status IN ('sent', 'partial', 'overdue')) as outstanding_amount
-    `);
+        (SELECT COUNT(*) FROM clients WHERE 1=1${wsClause}) as total_clients,
+        (SELECT COUNT(*) FROM projects WHERE 1=1${wsClause}) as total_projects,
+        (SELECT COUNT(*) FROM quotations WHERE 1=1${wsClause}) as total_quotations,
+        (SELECT COUNT(*) FROM invoices WHERE 1=1${wsClause}) as total_invoices,
+        (SELECT SUM(total_amount) FROM invoices WHERE status = 'paid'${wsClause}) as total_revenue,
+        (SELECT SUM(total_amount) FROM invoices WHERE status IN ('sent', 'partial', 'overdue')${wsClause}) as outstanding_amount
+    `, repeat(6));
 
     res.json({
       success: true,
@@ -245,6 +264,8 @@ router.put('/notifications/:id/read', authorizePermission('dashboard', 'view'), 
 // Get recent projects
 router.get('/recent-projects', authorizePermission('dashboard', 'view'), async (req, res) => {
   try {
+    const workspaceId = req.workspaceId || req.workspaceFilter?.value;
+    const isSuperAdmin = req.isSuperAdmin === true;
     const recentProjects = await query(`
       SELECT 
         p.id,
@@ -257,9 +278,10 @@ router.get('/recent-projects', authorizePermission('dashboard', 'view'), async (
         c.company_name
       FROM projects p
       JOIN clients c ON p.client_id = c.id
+      WHERE 1=1 ${isSuperAdmin ? '' : ' AND p.workspace_id = ? AND c.workspace_id = ?'}
       ORDER BY p.created_at DESC
       LIMIT 5
-    `);
+    `, isSuperAdmin ? [] : [workspaceId, workspaceId]);
 
     res.json({
       success: true,
@@ -277,6 +299,8 @@ router.get('/recent-projects', authorizePermission('dashboard', 'view'), async (
 // Get recent invoices
 router.get('/recent-invoices', authorizePermission('dashboard', 'view'), async (req, res) => {
   try {
+    const workspaceId = req.workspaceId || req.workspaceFilter?.value;
+    const isSuperAdmin = req.isSuperAdmin === true;
     const recentInvoices = await query(`
       SELECT 
         i.id,
@@ -289,9 +313,10 @@ router.get('/recent-invoices', authorizePermission('dashboard', 'view'), async (
         c.company_name
       FROM invoices i
       JOIN clients c ON i.client_id = c.id
+      WHERE 1=1 ${isSuperAdmin ? '' : ' AND i.workspace_id = ? AND c.workspace_id = ?'}
       ORDER BY i.created_at DESC
       LIMIT 5
-    `);
+    `, isSuperAdmin ? [] : [workspaceId, workspaceId]);
 
     res.json({
       success: true,

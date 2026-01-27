@@ -4,11 +4,14 @@ const { authenticateToken, authorizePermission, adminOnly } = require('../middle
 const { query: dbQuery } = require('../config/database');
 const bcrypt = require('bcryptjs');
 const { sendClientCredentials } = require('../utils/email');
+const { getWorkspaceFilter } = require('../utils/dataFiltering');
+const { workspaceContext } = require('../middleware/workspaceContext');
 
 const router = express.Router();
 
-// Apply authentication to all routes
+// Apply authentication + workspace context to all routes
 router.use(authenticateToken);
+router.use(workspaceContext);
 
 // Validation middleware
 const validateUser = [
@@ -58,6 +61,11 @@ router.get('/', authorizePermission('users', 'view'), [
     let whereClause = 'WHERE 1=1';
     const whereParams = [];
 
+    // Workspace filter (primary)
+    const ws = getWorkspaceFilter(req, 'u', 'workspace_id');
+    whereClause += ws.whereClause;
+    whereParams.push(...ws.whereParams);
+
     if (search) {
       whereClause += ' AND (u.full_name LIKE ? OR u.email LIKE ? OR u.username LIKE ?)';
       const searchTerm = `%${search}%`;
@@ -106,14 +114,16 @@ router.get('/', authorizePermission('users', 'view'), [
 
     // Get projects assigned to each user
     for (const user of users) {
+      const wsProj = getWorkspaceFilter(req, 'p', 'workspace_id');
       const userProjects = await dbQuery(
         `SELECT p.id, p.title, p.status
          FROM projects p
          WHERE p.id IN (
            SELECT project_id FROM user_projects WHERE user_id = ?
          )
+         ${wsProj.whereClause ? `AND 1=1 ${wsProj.whereClause}` : ''}
          LIMIT 5`,
-        [user.id]
+        [user.id, ...wsProj.whereParams]
       );
       user.assigned_projects = userProjects;
     }
@@ -157,6 +167,7 @@ router.get('/:id', authorizePermission('users', 'view'), async (req, res) => {
   try {
     const userId = req.params.id;
 
+    const ws = getWorkspaceFilter(req, 'u', 'workspace_id');
     const users = await dbQuery(
       `SELECT 
         u.*,
@@ -165,8 +176,8 @@ router.get('/:id', authorizePermission('users', 'view'), async (req, res) => {
         c.email as client_email
        FROM users u
        LEFT JOIN clients c ON u.client_id = c.id
-       WHERE u.id = ?`,
-      [userId]
+       WHERE u.id = ? ${ws.whereClause}`,
+      [userId, ...ws.whereParams]
     );
 
     if (users.length === 0) {
@@ -177,13 +188,14 @@ router.get('/:id', authorizePermission('users', 'view'), async (req, res) => {
     }
 
     // Get assigned projects
+    const wsProj = getWorkspaceFilter(req, 'p', 'workspace_id');
     const projects = await dbQuery(
       `SELECT p.id, p.title, p.status, p.client_id
        FROM projects p
        WHERE p.id IN (
          SELECT project_id FROM user_projects WHERE user_id = ?
-       )`,
-      [userId]
+       ) ${wsProj.whereClause ? `AND 1=1 ${wsProj.whereClause}` : ''}`,
+      [userId, ...wsProj.whereParams]
     );
 
     // Get assigned roles (if using role_permissions system)
@@ -281,7 +293,11 @@ router.post('/', authorizePermission('users', 'create'), validateUser, async (re
 
     // Check if client exists (if provided)
     if (client_id) {
-      const clientCheck = await dbQuery('SELECT id FROM clients WHERE id = ?', [client_id]);
+      const wsCli = getWorkspaceFilter(req, '', 'workspace_id');
+      const clientCheck = await dbQuery(
+        `SELECT id FROM clients WHERE id = ? ${wsCli.whereClause}`,
+        [client_id, ...wsCli.whereParams]
+      );
       if (clientCheck.length === 0) {
         return res.status(400).json({
           success: false,
@@ -291,9 +307,10 @@ router.post('/', authorizePermission('users', 'create'), validateUser, async (re
     }
 
     // Insert user
+    const workspaceId = req.workspaceId || req.workspaceFilter?.value;
     const result = await dbQuery(
-      `INSERT INTO users (username, email, password, full_name, role, client_id, is_active)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO users (username, email, password, full_name, role, client_id, is_active, workspace_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         finalUsername,
         email,
@@ -301,7 +318,8 @@ router.post('/', authorizePermission('users', 'create'), validateUser, async (re
         full_name,
         role,
         client_id || null,
-        is_active !== undefined ? is_active : true
+        is_active !== undefined ? is_active : true,
+        workspaceId || null
       ]
     );
 
@@ -325,8 +343,8 @@ router.post('/', authorizePermission('users', 'create'), validateUser, async (re
         c.company_name as client_company
        FROM users u
        LEFT JOIN clients c ON u.client_id = c.id
-       WHERE u.id = ?`,
-      [userId]
+       WHERE u.id = ? ${getWorkspaceFilter(req, 'u', 'workspace_id').whereClause}`,
+      [userId, ...getWorkspaceFilter(req, 'u', 'workspace_id').whereParams]
     );
 
     // Send credentials email if requested and password was generated
@@ -395,7 +413,11 @@ router.put('/:id', authorizePermission('users', 'edit'), [
     } = req.body;
 
     // Check if user exists
-    const userCheck = await dbQuery('SELECT * FROM users WHERE id = ?', [userId]);
+    const ws = getWorkspaceFilter(req, '', 'workspace_id');
+    const userCheck = await dbQuery(
+      `SELECT * FROM users WHERE id = ? ${ws.whereClause}`,
+      [userId, ...ws.whereParams]
+    );
     if (userCheck.length === 0) {
       return res.status(404).json({
         success: false,
@@ -428,7 +450,11 @@ router.put('/:id', authorizePermission('users', 'edit'), [
     // Check if client exists (if provided)
     if (client_id !== undefined) {
       if (client_id) {
-        const clientCheck = await dbQuery('SELECT id FROM clients WHERE id = ?', [client_id]);
+        const wsCli = getWorkspaceFilter(req, '', 'workspace_id');
+        const clientCheck = await dbQuery(
+          `SELECT id FROM clients WHERE id = ? ${wsCli.whereClause}`,
+          [client_id, ...wsCli.whereParams]
+        );
         if (clientCheck.length === 0) {
           return res.status(400).json({
             success: false,
@@ -487,9 +513,10 @@ router.put('/:id', authorizePermission('users', 'edit'), [
 
     updateParams.push(userId);
 
+    const wsUpd = getWorkspaceFilter(req, '', 'workspace_id');
     await dbQuery(
-      `UPDATE users SET ${updates.join(', ')} WHERE id = ?`,
-      updateParams
+      `UPDATE users SET ${updates.join(', ')} WHERE id = ? ${wsUpd.whereClause}`,
+      [...updateParams, ...wsUpd.whereParams]
     );
 
     // Fetch updated user
@@ -510,8 +537,8 @@ router.put('/:id', authorizePermission('users', 'edit'), [
         c.company_name as client_company
        FROM users u
        LEFT JOIN clients c ON u.client_id = c.id
-       WHERE u.id = ?`,
-      [userId]
+       WHERE u.id = ? ${getWorkspaceFilter(req, 'u', 'workspace_id').whereClause}`,
+      [userId, ...getWorkspaceFilter(req, 'u', 'workspace_id').whereParams]
     );
 
     res.json({
@@ -542,7 +569,11 @@ router.delete('/:id', authorizePermission('users', 'delete'), async (req, res) =
     }
 
     // Check if user exists
-    const userCheck = await dbQuery('SELECT id FROM users WHERE id = ?', [userId]);
+    const wsDel = getWorkspaceFilter(req, '', 'workspace_id');
+    const userCheck = await dbQuery(
+      `SELECT id FROM users WHERE id = ? ${wsDel.whereClause}`,
+      [userId, ...wsDel.whereParams]
+    );
     if (userCheck.length === 0) {
       return res.status(404).json({
         success: false,
@@ -551,7 +582,8 @@ router.delete('/:id', authorizePermission('users', 'delete'), async (req, res) =
     }
 
     // Delete user
-    await dbQuery('DELETE FROM users WHERE id = ?', [userId]);
+    const wsD = getWorkspaceFilter(req, '', 'workspace_id');
+    await dbQuery(`DELETE FROM users WHERE id = ? ${wsD.whereClause}`, [userId, ...wsD.whereParams]);
 
     res.json({
       success: true,
@@ -585,12 +617,32 @@ router.post('/:id/projects', authorizePermission('users', 'edit'), [
     const { project_ids } = req.body;
 
     // Check if user exists
-    const userCheck = await dbQuery('SELECT id FROM users WHERE id = ?', [userId]);
+    const wsAssign = getWorkspaceFilter(req, '', 'workspace_id');
+    const userCheck = await dbQuery(
+      `SELECT id FROM users WHERE id = ? ${wsAssign.whereClause}`,
+      [userId, ...wsAssign.whereParams]
+    );
     if (userCheck.length === 0) {
       return res.status(404).json({
         success: false,
         message: 'User not found'
       });
+    }
+
+    // Ensure projects belong to this workspace (super admin bypass)
+    const wsProj = getWorkspaceFilter(req, '', 'workspace_id');
+    if (wsProj.whereClause) {
+      const placeholders = project_ids.map(() => '?').join(',');
+      const allowedProjects = await dbQuery(
+        `SELECT id FROM projects WHERE id IN (${placeholders}) ${wsProj.whereClause}`,
+        [...project_ids, ...wsProj.whereParams]
+      );
+      if (allowedProjects.length !== project_ids.length) {
+        return res.status(400).json({
+          success: false,
+          message: 'One or more projects are not available in your workspace'
+        });
+      }
     }
 
     // Check if user_projects table exists, if not create it

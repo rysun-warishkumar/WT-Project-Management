@@ -5,12 +5,14 @@ const fs = require('fs').promises;
 const { authenticateToken, authorizePermission } = require('../middleware/auth');
 const { body, validationResult, query: validatorQuery } = require('express-validator');
 const { query: dbQuery } = require('../config/database');
-const { getClientFilter, canAccessClientData } = require('../utils/dataFiltering');
+const { getClientFilter, canAccessClientData, getWorkspaceFilter } = require('../utils/dataFiltering');
+const { workspaceContext } = require('../middleware/workspaceContext');
 
 const router = express.Router();
 
-// Apply authentication to all routes
+// Apply authentication + workspace context to all routes
 router.use(authenticateToken);
+router.use(workspaceContext);
 
 // Ensure uploads directory exists
 const uploadsDir = path.join(__dirname, '../../uploads');
@@ -97,6 +99,11 @@ router.get('/', authorizePermission('files', 'view'), [
     // Build WHERE clause
     let whereClause = 'WHERE 1=1';
     const whereParams = [];
+
+    // Add workspace filter (primary)
+    const workspaceFilter = getWorkspaceFilter(req, 'f', 'workspace_id');
+    whereClause += workspaceFilter.whereClause;
+    whereParams.push(...workspaceFilter.whereParams);
 
     // Add client filter for client role users
     const clientFilter = getClientFilter(req, 'f', 'client_id');
@@ -256,10 +263,19 @@ router.post('/upload', authorizePermission('files', 'upload'), upload.single('fi
     }
 
     const { client_id, project_id, description, tags } = req.body;
+    const workspaceId = req.workspaceId || req.workspaceFilter?.value;
+    if (!workspaceId && !req.isSuperAdmin) {
+      await fs.unlink(req.file.path).catch(() => {});
+      return res.status(403).json({ success: false, message: 'Workspace context required' });
+    }
 
     // Check if client exists (if provided)
     if (client_id) {
-      const clientCheck = await dbQuery('SELECT id FROM clients WHERE id = ?', [client_id]);
+      const wsCli = getWorkspaceFilter(req, '', 'workspace_id');
+      const clientCheck = await dbQuery(
+        `SELECT id FROM clients WHERE id = ? ${wsCli.whereClause}`,
+        [client_id, ...wsCli.whereParams]
+      );
       if (clientCheck.length === 0) {
         await fs.unlink(req.file.path).catch(() => {});
         return res.status(400).json({
@@ -271,7 +287,11 @@ router.post('/upload', authorizePermission('files', 'upload'), upload.single('fi
 
     // Check if project exists (if provided)
     if (project_id) {
-      const projectCheck = await dbQuery('SELECT id FROM projects WHERE id = ?', [project_id]);
+      const wsProj = getWorkspaceFilter(req, '', 'workspace_id');
+      const projectCheck = await dbQuery(
+        `SELECT id FROM projects WHERE id = ? ${wsProj.whereClause}`,
+        [project_id, ...wsProj.whereParams]
+      );
       if (projectCheck.length === 0) {
         await fs.unlink(req.file.path).catch(() => {});
         return res.status(400).json({
@@ -298,8 +318,8 @@ router.post('/upload', authorizePermission('files', 'upload'), upload.single('fi
     const result = await dbQuery(
       `INSERT INTO files (
         filename, original_name, file_path, file_size, mime_type, file_type,
-        client_id, project_id, uploaded_by, description, tags
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        client_id, project_id, uploaded_by, description, tags, workspace_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         req.file.filename,
         req.file.originalname,
@@ -311,7 +331,8 @@ router.post('/upload', authorizePermission('files', 'upload'), upload.single('fi
         project_id || null,
         req.user.id,
         description || null,
-        parsedTags ? JSON.stringify(parsedTags) : null
+        parsedTags ? JSON.stringify(parsedTags) : null,
+        workspaceId || null
       ]
     );
 
@@ -329,8 +350,8 @@ router.post('/upload', authorizePermission('files', 'upload'), upload.single('fi
        LEFT JOIN clients c ON f.client_id = c.id
        LEFT JOIN projects p ON f.project_id = p.id
        LEFT JOIN users u ON f.uploaded_by = u.id
-       WHERE f.id = ?`,
-      [fileId]
+       WHERE f.id = ? ${getWorkspaceFilter(req, 'f', 'workspace_id').whereClause}`,
+      [fileId, ...getWorkspaceFilter(req, 'f', 'workspace_id').whereParams]
     );
 
     res.status(201).json({
@@ -356,7 +377,11 @@ router.get('/:id/download', authorizePermission('files', 'download'), async (req
   try {
     const fileId = req.params.id;
 
-    const files = await dbQuery('SELECT * FROM files WHERE id = ?', [fileId]);
+    const ws = getWorkspaceFilter(req, '', 'workspace_id');
+    const files = await dbQuery(
+      `SELECT * FROM files WHERE id = ? ${ws.whereClause}`,
+      [fileId, ...ws.whereParams]
+    );
 
     if (files.length === 0) {
       return res.status(404).json({
@@ -427,7 +452,11 @@ router.put('/:id', authorizePermission('files', 'edit'), [
     const { client_id, project_id, description, tags } = req.body;
 
     // Check if file exists
-    const fileCheck = await dbQuery('SELECT * FROM files WHERE id = ?', [fileId]);
+    const ws = getWorkspaceFilter(req, '', 'workspace_id');
+    const fileCheck = await dbQuery(
+      `SELECT * FROM files WHERE id = ? ${ws.whereClause}`,
+      [fileId, ...ws.whereParams]
+    );
     if (fileCheck.length === 0) {
       return res.status(404).json({
         success: false,
@@ -437,7 +466,11 @@ router.put('/:id', authorizePermission('files', 'edit'), [
 
     // Check if client exists (if provided)
     if (client_id) {
-      const clientCheck = await dbQuery('SELECT id FROM clients WHERE id = ?', [client_id]);
+      const wsCli = getWorkspaceFilter(req, '', 'workspace_id');
+      const clientCheck = await dbQuery(
+        `SELECT id FROM clients WHERE id = ? ${wsCli.whereClause}`,
+        [client_id, ...wsCli.whereParams]
+      );
       if (clientCheck.length === 0) {
         return res.status(400).json({
           success: false,
@@ -448,7 +481,11 @@ router.put('/:id', authorizePermission('files', 'edit'), [
 
     // Check if project exists (if provided)
     if (project_id) {
-      const projectCheck = await dbQuery('SELECT id FROM projects WHERE id = ?', [project_id]);
+      const wsProj = getWorkspaceFilter(req, '', 'workspace_id');
+      const projectCheck = await dbQuery(
+        `SELECT id FROM projects WHERE id = ? ${wsProj.whereClause}`,
+        [project_id, ...wsProj.whereParams]
+      );
       if (projectCheck.length === 0) {
         return res.status(400).json({
           success: false,
@@ -502,9 +539,10 @@ router.put('/:id', authorizePermission('files', 'edit'), [
 
     updateParams.push(fileId);
 
+    const wsUpd = getWorkspaceFilter(req, '', 'workspace_id');
     await dbQuery(
-      `UPDATE files SET ${updates.join(', ')} WHERE id = ?`,
-      updateParams
+      `UPDATE files SET ${updates.join(', ')} WHERE id = ? ${wsUpd.whereClause}`,
+      [...updateParams, ...wsUpd.whereParams]
     );
 
     // Fetch updated file
@@ -519,8 +557,8 @@ router.put('/:id', authorizePermission('files', 'edit'), [
        LEFT JOIN clients c ON f.client_id = c.id
        LEFT JOIN projects p ON f.project_id = p.id
        LEFT JOIN users u ON f.uploaded_by = u.id
-       WHERE f.id = ?`,
-      [fileId]
+       WHERE f.id = ? ${getWorkspaceFilter(req, 'f', 'workspace_id').whereClause}`,
+      [fileId, ...getWorkspaceFilter(req, 'f', 'workspace_id').whereParams]
     );
 
     res.json({
@@ -543,7 +581,11 @@ router.delete('/:id', authorizePermission('files', 'delete'), async (req, res) =
     const fileId = req.params.id;
 
     // Get file record
-    const files = await dbQuery('SELECT * FROM files WHERE id = ?', [fileId]);
+    const wsDel = getWorkspaceFilter(req, '', 'workspace_id');
+    const files = await dbQuery(
+      `SELECT * FROM files WHERE id = ? ${wsDel.whereClause}`,
+      [fileId, ...wsDel.whereParams]
+    );
 
     if (files.length === 0) {
       return res.status(404).json({
@@ -563,7 +605,8 @@ router.delete('/:id', authorizePermission('files', 'delete'), async (req, res) =
     }
 
     // Delete file record from database
-    await dbQuery('DELETE FROM files WHERE id = ?', [fileId]);
+    const wsD = getWorkspaceFilter(req, '', 'workspace_id');
+    await dbQuery(`DELETE FROM files WHERE id = ? ${wsD.whereClause}`, [fileId, ...wsD.whereParams]);
 
     res.json({
       success: true,

@@ -2,11 +2,14 @@ const express = require('express');
 const { query: validatorQuery, body, validationResult } = require('express-validator');
 const { authenticateToken, authorizePermission } = require('../middleware/auth');
 const { query: dbQuery } = require('../config/database');
+const { getWorkspaceFilter } = require('../utils/dataFiltering');
+const { workspaceContext } = require('../middleware/workspaceContext');
 
 const router = express.Router();
 
 // Apply authentication to all routes
 router.use(authenticateToken);
+router.use(workspaceContext);
 
 // Validation middleware
 const validateReportParams = [
@@ -34,6 +37,11 @@ router.get('/financial', authorizePermission('reports', 'view'), validateReportP
     // Build WHERE clause
     let whereClause = 'WHERE 1=1';
     const whereParams = [];
+
+    // Workspace filter (primary)
+    const ws = getWorkspaceFilter(req, 'i', 'workspace_id');
+    whereClause += ws.whereClause;
+    whereParams.push(...ws.whereParams);
 
     if (start_date) {
       whereClause += ' AND i.invoice_date >= ?';
@@ -89,6 +97,44 @@ router.get('/financial', authorizePermission('reports', 'view'), validateReportP
     `, whereParams);
 
     // Get revenue by client
+    // Build separate WHERE clause for this query
+    // Filter only on client's workspace_id (invoices belong to clients, so this is sufficient)
+    let revenueByClientWhere = 'WHERE 1=1';
+    const revenueByClientParams = [];
+    
+    // Apply workspace filter to clients table only (qualified with table alias)
+    // Ensure workspace_id is always qualified to avoid ambiguity in JOIN queries
+    const user = req.user;
+    const isSuperAdmin = user && (user.is_super_admin === true || user.is_super_admin === 1 || user.isSuperAdmin === true);
+    
+    if (!isSuperAdmin) {
+      const workspaceId = req.workspaceId || req.workspaceFilter?.value || user?.workspace_id || user?.workspaceId;
+      if (workspaceId) {
+        revenueByClientWhere += ' AND c.workspace_id = ?';
+        revenueByClientParams.push(workspaceId);
+      } else {
+        revenueByClientWhere += ' AND 1=0'; // No workspace = no results
+      }
+    }
+    // Super admin: no workspace filter needed
+    
+    if (start_date) {
+      revenueByClientWhere += ' AND i.invoice_date >= ?';
+      revenueByClientParams.push(start_date);
+    }
+    if (end_date) {
+      revenueByClientWhere += ' AND i.invoice_date <= ?';
+      revenueByClientParams.push(end_date);
+    }
+    if (client_id) {
+      revenueByClientWhere += ' AND i.client_id = ?';
+      revenueByClientParams.push(client_id);
+    }
+    if (project_id) {
+      revenueByClientWhere += ' AND i.project_id = ?';
+      revenueByClientParams.push(project_id);
+    }
+    
     const revenueByClient = await dbQuery(`
       SELECT 
         c.id,
@@ -100,11 +146,11 @@ router.get('/financial', authorizePermission('reports', 'view'), validateReportP
         SUM(i.total_amount - i.paid_amount) as outstanding
       FROM clients c
       INNER JOIN invoices i ON c.id = i.client_id
-      ${whereClause.replace('i.', '')}
+      ${revenueByClientWhere}
       GROUP BY c.id, c.full_name, c.company_name
       ORDER BY total_amount DESC
       LIMIT 10
-    `, whereParams);
+    `, revenueByClientParams);
 
     // Get payment history (if payments table exists)
     let paymentHistory = [];
@@ -176,19 +222,31 @@ router.get('/client-performance', authorizePermission('reports', 'view'), valida
 
     const { start_date, end_date } = req.query;
 
-    let whereClause = '';
+    let whereClause = 'WHERE 1=1';
     const whereParams = [];
 
-    if (start_date || end_date) {
-      whereClause = 'WHERE 1=1';
-      if (start_date) {
-        whereClause += ' AND c.onboarding_date >= ?';
-        whereParams.push(start_date);
+    // Workspace filter (primary) - explicitly qualified to avoid ambiguity in JOIN queries
+    const user = req.user;
+    const isSuperAdmin = user && (user.is_super_admin === true || user.is_super_admin === 1 || user.isSuperAdmin === true);
+    
+    if (!isSuperAdmin) {
+      const workspaceId = req.workspaceId || req.workspaceFilter?.value || user?.workspace_id || user?.workspaceId;
+      if (workspaceId) {
+        whereClause += ' AND c.workspace_id = ?';
+        whereParams.push(workspaceId);
+      } else {
+        whereClause += ' AND 1=0'; // No workspace = no results
       }
-      if (end_date) {
-        whereClause += ' AND c.onboarding_date <= ?';
-        whereParams.push(end_date);
-      }
+    }
+    // Super admin: no workspace filter needed
+
+    if (start_date) {
+      whereClause += ' AND c.onboarding_date >= ?';
+      whereParams.push(start_date);
+    }
+    if (end_date) {
+      whereClause += ' AND c.onboarding_date <= ?';
+      whereParams.push(end_date);
     }
 
     // Get client statistics
@@ -222,14 +280,40 @@ router.get('/client-performance', authorizePermission('reports', 'view'), valida
     `, whereParams);
 
     // Get client status distribution
+    // Use qualified workspace_id to avoid ambiguity
+    let statusDistributionWhere = 'WHERE 1=1';
+    const statusDistributionParams = [];
+    
+    // Explicitly add workspace filter with qualified column name
+    // Reuse the user and isSuperAdmin variables already declared above
+    if (!isSuperAdmin) {
+      const workspaceId = req.workspaceId || req.workspaceFilter?.value || user?.workspace_id || user?.workspaceId;
+      if (workspaceId) {
+        statusDistributionWhere += ' AND c.workspace_id = ?';
+        statusDistributionParams.push(workspaceId);
+      } else {
+        statusDistributionWhere += ' AND 1=0'; // No workspace = no results
+      }
+    }
+    // Super admin: no workspace filter needed
+    
+    if (start_date) {
+      statusDistributionWhere += ' AND c.onboarding_date >= ?';
+      statusDistributionParams.push(start_date);
+    }
+    if (end_date) {
+      statusDistributionWhere += ' AND c.onboarding_date <= ?';
+      statusDistributionParams.push(end_date);
+    }
+    
     const statusDistribution = await dbQuery(`
       SELECT 
-        status,
+        c.status,
         COUNT(*) as count
-      FROM clients
-      ${whereClause}
-      GROUP BY status
-    `, whereParams);
+      FROM clients c
+      ${statusDistributionWhere}
+      GROUP BY c.status
+    `, statusDistributionParams);
 
     res.json({
       success: true,
@@ -269,6 +353,11 @@ router.get('/project-performance', authorizePermission('reports', 'view'), valid
 
     let whereClause = 'WHERE 1=1';
     const whereParams = [];
+
+    // Workspace filter (primary)
+    const ws = getWorkspaceFilter(req, 'p', 'workspace_id');
+    whereClause += ws.whereClause;
+    whereParams.push(...ws.whereParams);
 
     if (start_date) {
       whereClause += ' AND p.start_date >= ?';
@@ -378,6 +467,11 @@ router.get('/invoices', authorizePermission('reports', 'view'), validateReportPa
     let whereClause = 'WHERE 1=1';
     const whereParams = [];
 
+    // Workspace filter (primary)
+    const ws = getWorkspaceFilter(req, 'i', 'workspace_id');
+    whereClause += ws.whereClause;
+    whereParams.push(...ws.whereParams);
+
     if (start_date) {
       whereClause += ' AND i.invoice_date >= ?';
       whereParams.push(start_date);
@@ -466,26 +560,31 @@ router.get('/invoices', authorizePermission('reports', 'view'), validateReportPa
 // Get summary report (all key metrics)
 router.get('/summary', authorizePermission('reports', 'view'), async (req, res) => {
   try {
+    const workspaceId = req.workspaceId || req.workspaceFilter?.value;
+    const isSuperAdmin = req.isSuperAdmin === true;
+    const wsClause = isSuperAdmin ? '' : ' AND workspace_id = ?';
+    const repeat = (n) => (isSuperAdmin ? [] : Array(n).fill(workspaceId));
+
     // Get all key metrics
     const summary = await dbQuery(`
       SELECT 
-        (SELECT COUNT(*) FROM clients) as total_clients,
-        (SELECT COUNT(*) FROM clients WHERE status = 'active') as active_clients,
-        (SELECT COUNT(*) FROM projects) as total_projects,
-        (SELECT COUNT(*) FROM projects WHERE status = 'in_progress') as active_projects,
-        (SELECT COUNT(*) FROM projects WHERE status = 'completed') as completed_projects,
-        (SELECT COUNT(*) FROM quotations) as total_quotations,
-        (SELECT COUNT(*) FROM quotations WHERE status = 'sent') as pending_quotations,
-        (SELECT COUNT(*) FROM invoices) as total_invoices,
-        (SELECT COUNT(*) FROM invoices WHERE status = 'paid') as paid_invoices,
-        (SELECT COUNT(*) FROM invoices WHERE status IN ('sent', 'partial', 'overdue')) as unpaid_invoices,
-        (SELECT SUM(total_amount) FROM invoices WHERE status = 'paid') as total_revenue,
-        (SELECT SUM(total_amount - paid_amount) FROM invoices WHERE status IN ('sent', 'partial', 'overdue')) as outstanding_amount,
-        (SELECT COUNT(*) FROM files) as total_files,
-        (SELECT COUNT(*) FROM credentials) as total_credentials,
-        (SELECT COUNT(*) FROM conversations) as total_conversations,
-        (SELECT COUNT(*) FROM users WHERE is_active = 1) as active_users
-    `);
+        (SELECT COUNT(*) FROM clients WHERE 1=1${wsClause}) as total_clients,
+        (SELECT COUNT(*) FROM clients WHERE status = 'active'${wsClause}) as active_clients,
+        (SELECT COUNT(*) FROM projects WHERE 1=1${wsClause}) as total_projects,
+        (SELECT COUNT(*) FROM projects WHERE status = 'in_progress'${wsClause}) as active_projects,
+        (SELECT COUNT(*) FROM projects WHERE status = 'completed'${wsClause}) as completed_projects,
+        (SELECT COUNT(*) FROM quotations WHERE 1=1${wsClause}) as total_quotations,
+        (SELECT COUNT(*) FROM quotations WHERE status = 'sent'${wsClause}) as pending_quotations,
+        (SELECT COUNT(*) FROM invoices WHERE 1=1${wsClause}) as total_invoices,
+        (SELECT COUNT(*) FROM invoices WHERE status = 'paid'${wsClause}) as paid_invoices,
+        (SELECT COUNT(*) FROM invoices WHERE status IN ('sent', 'partial', 'overdue')${wsClause}) as unpaid_invoices,
+        (SELECT SUM(total_amount) FROM invoices WHERE status = 'paid'${wsClause}) as total_revenue,
+        (SELECT SUM(total_amount - paid_amount) FROM invoices WHERE status IN ('sent', 'partial', 'overdue')${wsClause}) as outstanding_amount,
+        (SELECT COUNT(*) FROM files WHERE 1=1${wsClause}) as total_files,
+        (SELECT COUNT(*) FROM credentials WHERE 1=1${wsClause}) as total_credentials,
+        (SELECT COUNT(*) FROM conversations WHERE 1=1${wsClause}) as total_conversations,
+        (SELECT COUNT(*) FROM users WHERE is_active = 1${wsClause}) as active_users
+    `, repeat(16));
 
     res.json({
       success: true,
