@@ -335,9 +335,23 @@ const sendVerificationEmail = async (userData, verificationToken) => {
     const fromEmail = smtpConfig?.from || smtpConfig?.auth?.user || process.env.SMTP_FROM || process.env.SMTP_USER || 'noreply@example.com';
     const fromAddress = `"${APP_NAME}" <${fromEmail}>`;
     
-    // Use CLIENT_URL for frontend URLs, fallback to APP_URL or localhost
-    const baseUrl = process.env.CLIENT_URL || process.env.APP_URL || 'http://localhost:3000';
-    const verificationUrl = `${baseUrl}/verify-email?token=${encodeURIComponent(verificationToken)}`;
+    // Prefer backend redirect URL if APP_URL/API base is configured, otherwise fall back to direct frontend URL
+    const frontendBase = process.env.CLIENT_URL || 'http://localhost:3000';
+    const backendBase =
+      process.env.APP_URL || // usually backend public URL in production
+      process.env.API_BASE_URL ||
+      process.env.BACKEND_URL ||
+      '';
+
+    // If we know the backend public URL, send users there so it can verify
+    // the token and then redirect back to the frontend login with a status flag.
+    const verificationUrl = backendBase
+      ? `${backendBase.replace(/\/+$/, '')}/api/auth/verify-email?token=${encodeURIComponent(
+          verificationToken
+        )}&redirect=1`
+      : `${frontendBase.replace(/\/+$/, '')}/verify-email?token=${encodeURIComponent(
+          verificationToken
+        )}`;
     
     const mailOptions = {
       from: fromAddress,

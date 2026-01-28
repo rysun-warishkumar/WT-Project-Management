@@ -521,7 +521,7 @@ router.post('/register', registerValidation, async (req, res) => {
 // Email verification route
 router.get('/verify-email', async (req, res) => {
   try {
-    const { token } = req.query;
+    const { token, redirect } = req.query;
 
     if (!token) {
       return res.status(400).json({
@@ -614,24 +614,33 @@ router.get('/verify-email', async (req, res) => {
 
     const user = users[0];
 
-    if (user.email_verified) {
-      return res.status(400).json({
-        success: false,
-        message: 'Email already verified'
-      });
+    const alreadyVerified = !!user.email_verified;
+
+    if (!alreadyVerified) {
+      // Verify email
+      await query(
+        'UPDATE users SET email_verified = TRUE, email_verification_token = NULL WHERE id = ?',
+        [user.id]
+      );
+      console.log('Email verified successfully for user:', user.email);
+    } else {
+      console.log('Email verification link opened, but email is already verified for:', user.email);
     }
 
-    // Verify email
-    await query(
-      'UPDATE users SET email_verified = TRUE, email_verification_token = NULL WHERE id = ?',
-      [user.id]
-    );
-    
-    console.log('Email verified successfully for user:', user.email);
+    // If redirect flag is present, send user to frontend login with a status indicator
+    if (redirect === '1') {
+      const clientBase = (process.env.CLIENT_URL || 'http://localhost:3000').replace(/\/+$/, '');
+      const status = alreadyVerified ? 'already' : '1';
+      const redirectUrl = `${clientBase}/login?verified=${encodeURIComponent(status)}`;
+      return res.redirect(302, redirectUrl);
+    }
 
+    // Default JSON response (used by SPA /verify-email page)
     res.json({
-      success: true,
-      message: 'Email verified successfully! You can now log in.'
+      success: !alreadyVerified,
+      message: alreadyVerified
+        ? 'Email already verified'
+        : 'Email verified successfully! You can now log in.'
     });
   } catch (error) {
     console.error('Email verification error:', error);

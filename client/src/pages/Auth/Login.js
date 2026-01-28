@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { Eye, EyeOff, Lock, User } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import toast from 'react-hot-toast';
@@ -9,12 +9,25 @@ const Login = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const { login } = useAuth();
+  const location = useLocation();
 
   const {
     register,
     handleSubmit,
     formState: { errors },
   } = useForm();
+
+  // Show a friendly message when redirected after successful email verification
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const verified = params.get('verified');
+
+    if (verified === '1') {
+      toast.success('Your email has been verified. You can now log in.');
+    } else if (verified === 'already') {
+      toast.success('Your email is already verified. Please log in.');
+    }
+  }, [location.search]);
 
   const onSubmit = async (data) => {
     setIsLoading(true);

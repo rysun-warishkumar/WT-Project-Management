@@ -11,6 +11,7 @@ import VerifyEmail from './pages/Auth/VerifyEmail';
 import ResendVerification from './pages/Auth/ResendVerification';
 import Terms from './pages/Legal/Terms';
 import Privacy from './pages/Legal/Privacy';
+import MobileDeviceNotice from './components/Common/MobileDeviceNotice';
 import Dashboard from './pages/Dashboard/Dashboard';
 import Clients from './pages/Clients/Clients';
 import ClientDetail from './pages/Clients/ClientDetail';
@@ -92,6 +93,7 @@ function App() {
       <AuthProvider>
         <Router>
           <div className="App">
+            <MobileDeviceNotice />
             <Toaster
               position="top-right"
               toastOptions={{
