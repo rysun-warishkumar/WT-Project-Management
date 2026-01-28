@@ -1,6 +1,39 @@
 const nodemailer = require('nodemailer');
 require('dotenv').config();
 
+// Email branding constants
+const APP_NAME = process.env.APP_NAME || 'W | Technology CMS';
+const COMPANY_NAME = 'W | Technology';
+const COMPANY_URL = 'https://wtechnology.in';
+const SUPPORT_EMAIL = 'info@wtechnology.in';
+
+// Reusable email footer HTML
+const getEmailFooter = () => {
+  return `
+    <div style="border-top: 2px solid #e5e7eb; margin-top: 40px; padding-top: 30px; text-align: center; color: #6b7280; font-size: 12px;">
+      <p style="margin: 0 0 10px 0;">
+        Powered By <a href="${COMPANY_URL}" style="color: #4F46E5; text-decoration: none; font-weight: bold;">${COMPANY_NAME}</a>
+      </p>
+      <p style="margin: 5px 0;">
+        Contact or report any issue on <a href="mailto:${SUPPORT_EMAIL}" style="color: #4F46E5; text-decoration: none;">${SUPPORT_EMAIL}</a>
+      </p>
+      <p style="margin: 15px 0 0 0; font-size: 11px;">
+        © ${new Date().getFullYear()} ${COMPANY_NAME}. All rights reserved.
+      </p>
+    </div>
+  `;
+};
+
+// Reusable email footer text (for plain text emails)
+const getEmailFooterText = () => {
+  return `
+---
+Powered By ${COMPANY_NAME} (${COMPANY_URL})
+Contact or report any issue on ${SUPPORT_EMAIL}
+© ${new Date().getFullYear()} ${COMPANY_NAME}. All rights reserved.
+  `.trim();
+};
+
 /**
  * Get SMTP configuration from database settings or environment
  * @returns {Promise<Object>} SMTP configuration
@@ -94,12 +127,14 @@ const sendClientCredentials = async (clientData, credentials) => {
     const transporter = await createTransporter();
     
     // Use the 'from' address from SMTP config, or fallback to user email
-    const fromAddress = smtpConfig?.from || smtpConfig?.auth?.user || process.env.SMTP_FROM || process.env.SMTP_USER || 'noreply@example.com';
+    // Format: "Display Name" <email@address.com>
+    const fromEmail = smtpConfig?.from || smtpConfig?.auth?.user || process.env.SMTP_FROM || process.env.SMTP_USER || 'noreply@example.com';
+    const fromAddress = `"${APP_NAME}" <${fromEmail}>`;
     
     const mailOptions = {
       from: fromAddress,
       to: clientData.email,
-      subject: `Welcome to ${process.env.APP_NAME || 'Client Management System'} - Your Login Credentials`,
+      subject: `Welcome to ${APP_NAME} - Your Login Credentials`,
       html: `
         <!DOCTYPE html>
         <html>
@@ -110,7 +145,7 @@ const sendClientCredentials = async (clientData, credentials) => {
         </head>
         <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
           <div style="background-color: #4F46E5; color: white; padding: 20px; text-align: center; border-radius: 8px 8px 0 0;">
-            <h1 style="margin: 0;">Welcome to ${process.env.APP_NAME || 'Client Management System'}</h1>
+            <h1 style="margin: 0;">Welcome to ${APP_NAME}</h1>
           </div>
           
           <div style="background-color: #f9fafb; padding: 30px; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 8px 8px;">
@@ -156,23 +191,15 @@ const sendClientCredentials = async (clientData, credentials) => {
             
             <p style="font-size: 16px; margin-top: 20px;">
               Best regards,<br>
-              <strong>${process.env.APP_NAME || 'Client Management System'} Team</strong>
+              <strong>${APP_NAME} Team</strong>
             </p>
-          </div>
-          
-          <div style="text-align: center; margin-top: 20px; padding: 20px; color: #6b7280; font-size: 12px;">
-            <p style="margin: 0;">
-              This is an automated email. Please do not reply to this message.
-            </p>
-            <p style="margin: 5px 0 0 0;">
-              © ${new Date().getFullYear()} ${process.env.APP_NAME || 'Client Management System'}. All rights reserved.
-            </p>
+            ${getEmailFooter()}
           </div>
         </body>
         </html>
       `,
       text: `
-Welcome to ${process.env.APP_NAME || 'Client Management System'}
+Welcome to ${APP_NAME}
 
 Dear ${clientData.full_name},
 
@@ -187,7 +214,9 @@ Password: ${credentials.password}
 If you have any questions or need assistance, please don't hesitate to contact us.
 
 Best regards,
-${process.env.APP_NAME || 'Client Management System'} Team
+${APP_NAME} Team
+
+${getEmailFooterText()}
       `,
     };
 
@@ -208,7 +237,9 @@ const sendVerificationEmail = async (userData, verificationToken) => {
     const transporter = await createTransporter();
     
     // Use the 'from' address from SMTP config, or fallback to user email
-    const fromAddress = smtpConfig?.from || smtpConfig?.auth?.user || process.env.SMTP_FROM || process.env.SMTP_USER || 'noreply@example.com';
+    // Format: "Display Name" <email@address.com>
+    const fromEmail = smtpConfig?.from || smtpConfig?.auth?.user || process.env.SMTP_FROM || process.env.SMTP_USER || 'noreply@example.com';
+    const fromAddress = `"${APP_NAME}" <${fromEmail}>`;
     
     // Use CLIENT_URL for frontend URLs, fallback to APP_URL or localhost
     const baseUrl = process.env.CLIENT_URL || process.env.APP_URL || 'http://localhost:3000';
@@ -217,7 +248,7 @@ const sendVerificationEmail = async (userData, verificationToken) => {
     const mailOptions = {
       from: fromAddress,
       to: userData.email,
-      subject: `Verify Your Email - ${process.env.APP_NAME || 'Client Management System'}`,
+      subject: `Verify Your Email - ${APP_NAME}`,
       html: `
         <!DOCTYPE html>
         <html>
@@ -235,7 +266,7 @@ const sendVerificationEmail = async (userData, verificationToken) => {
             <p style="font-size: 16px; margin-bottom: 20px;">Dear ${userData.full_name || userData.email},</p>
             
             <p style="font-size: 16px; margin-bottom: 20px;">
-              Thank you for registering with ${process.env.APP_NAME || 'Client Management System'}! 
+              Thank you for registering with ${APP_NAME}! 
               Please verify your email address by clicking the button below:
             </p>
             
@@ -260,14 +291,9 @@ const sendVerificationEmail = async (userData, verificationToken) => {
             
             <p style="font-size: 16px; margin-top: 30px;">
               Best regards,<br>
-              <strong>${process.env.APP_NAME || 'Client Management System'} Team</strong>
+              <strong>${APP_NAME} Team</strong>
             </p>
-          </div>
-          
-          <div style="text-align: center; margin-top: 20px; padding: 20px; color: #6b7280; font-size: 12px;">
-            <p style="margin: 0;">
-              This is an automated email. Please do not reply to this message.
-            </p>
+            ${getEmailFooter()}
           </div>
         </body>
         </html>
@@ -277,7 +303,7 @@ Verify Your Email Address
 
 Dear ${userData.full_name || userData.email},
 
-Thank you for registering with ${process.env.APP_NAME || 'Client Management System'}! 
+Thank you for registering with ${APP_NAME}! 
 Please verify your email address by visiting this link:
 
 ${verificationUrl}
@@ -286,7 +312,9 @@ ${verificationUrl}
 If you didn't create an account, please ignore this email.
 
 Best regards,
-${process.env.APP_NAME || 'Client Management System'} Team
+${APP_NAME} Team
+
+${getEmailFooterText()}
       `,
     };
 

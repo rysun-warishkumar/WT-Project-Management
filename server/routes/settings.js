@@ -212,7 +212,7 @@ router.post('/smtp/test', authorizePermission('settings', 'edit'), [
 
     const { host, port, secure, user, pass, from } = req.body;
 
-    // Create temporary transporter for testing with timeout configuration
+    // Create temporary transporter for testing (simple configuration like before)
     const nodemailer = require('nodemailer');
     const testTransporter = nodemailer.createTransport({
       host: host,
@@ -221,29 +221,11 @@ router.post('/smtp/test', authorizePermission('settings', 'edit'), [
       auth: {
         user: user,
         pass: pass
-      },
-      // Add timeout configuration to prevent long waits
-      connectionTimeout: 10000, // 10 seconds to establish connection
-      greetingTimeout: 10000,   // 10 seconds for SMTP greeting
-      socketTimeout: 10000,     // 10 seconds for socket operations
-      // For TLS/SSL connections
-      tls: {
-        rejectUnauthorized: false, // Accept self-signed certificates (for testing)
-        ciphers: 'SSLv3'
       }
     });
 
-    // Test connection with timeout wrapper
-    const verifyWithTimeout = (transporter, timeoutMs = 15000) => {
-      return Promise.race([
-        transporter.verify(),
-        new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Connection timeout: SMTP server did not respond within 15 seconds')), timeoutMs)
-        )
-      ]);
-    };
-
-    await verifyWithTimeout(testTransporter, 15000);
+    // Test connection (simple verify like before)
+    await testTransporter.verify();
 
     // Optionally send a test email
     let testEmailSent = false;
