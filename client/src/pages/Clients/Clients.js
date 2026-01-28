@@ -155,15 +155,17 @@ const Clients = () => {
   return (
     <div className="space-y-6">
       {/* Page Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Clients</h1>
-          <p className="text-gray-600">Manage your client relationships and information</p>
+          <h1 className="text-xl sm:text-2xl font-bold text-gray-900">Clients</h1>
+          <p className="text-sm sm:text-base text-gray-600">
+            Manage your client relationships and information
+          </p>
         </div>
-        <div className="flex items-center space-x-3">
+        <div className="flex flex-wrap items-center gap-2 sm:space-x-3">
           <button
             onClick={handleRefresh}
-            className="btn btn-outline"
+            className="btn btn-outline flex-1 sm:flex-none justify-center"
             disabled={isLoading}
           >
             <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
@@ -172,7 +174,7 @@ const Clients = () => {
           {canCreate && (
             <button
               onClick={() => setIsModalOpen(true)}
-              className="btn btn-primary"
+              className="btn btn-primary flex-1 sm:flex-none justify-center"
             >
               <Plus className="h-4 w-4 mr-2" />
               Add Client
@@ -188,7 +190,7 @@ const Clients = () => {
         <div className="card-body">
           <form onSubmit={handleSearch} className="space-y-4">
             {/* Search Bar */}
-            <div className="flex gap-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:gap-4">
               <div className="flex-1 relative">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
                 <input
@@ -199,13 +201,13 @@ const Clients = () => {
                   className="form-input pl-10 w-full"
                 />
               </div>
-              <button type="submit" className="btn btn-primary">
+              <button type="submit" className="btn btn-primary w-full sm:w-auto justify-center">
                 Search
               </button>
               <button
                 type="button"
                 onClick={() => setShowFilters(!showFilters)}
-                className="btn btn-secondary"
+                className="btn btn-secondary w-full sm:w-auto justify-center"
               >
                 <Filter className="h-4 w-4 mr-2" />
                 Filters

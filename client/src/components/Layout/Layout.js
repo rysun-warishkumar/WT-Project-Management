@@ -112,7 +112,11 @@ const Layout = () => {
                 <X className="h-6 w-6 text-white" />
               </button>
             </div>
-            <SidebarContent navigation={navigation} isActiveRoute={isActiveRoute} />
+            <SidebarContent
+              navigation={navigation}
+              isActiveRoute={isActiveRoute}
+              onItemClick={() => setSidebarOpen(false)}
+            />
           </div>
         </div>
       )}
@@ -141,7 +145,8 @@ const Layout = () => {
 
           <div className="flex-1 px-4 flex justify-between">
             <div className="flex-1 flex items-center space-x-4">
-              <h1 className="text-2xl font-semibold text-gray-900">
+              {/* Hide long title on small screens to keep header compact */}
+              <h1 className="hidden sm:block text-2xl font-semibold text-gray-900">
                 Client Management System
               </h1>
               <WorkspaceDisplay />
@@ -212,7 +217,7 @@ const Layout = () => {
   );
 };
 
-const SidebarContent = ({ navigation, isActiveRoute, isCollapsed = false, onToggleCollapse }) => {
+const SidebarContent = ({ navigation, isActiveRoute, isCollapsed = false, onToggleCollapse, onItemClick }) => {
   const navigate = useNavigate();
 
   return (
@@ -256,7 +261,12 @@ const SidebarContent = ({ navigation, isActiveRoute, isCollapsed = false, onTogg
             return (
               <button
                 key={item.name}
-                onClick={() => navigate(item.href)}
+                onClick={() => {
+                  navigate(item.href);
+                  if (onItemClick) {
+                    onItemClick();
+                  }
+                }}
                 className={`
                   nav-link w-full
                   ${isActive ? 'nav-link-active' : ''}

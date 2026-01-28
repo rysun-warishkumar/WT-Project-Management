@@ -22,9 +22,12 @@ const WorkspaceDisplay = () => {
 
   return (
     <div className="relative">
-      <div className="flex items-center text-sm text-gray-600">
-        <Building2 className="h-4 w-4 mr-1.5 text-gray-500" />
-        <span className="font-medium text-gray-700">{workspace.name || 'My Workspace'}</span>
+      <div className="flex items-center text-xs sm:text-sm text-gray-600">
+        {/* Slightly larger icon on small screens for better tap target */}
+        <Building2 className="h-5 w-5 sm:h-4 sm:w-4 mr-1.5 text-gray-500" />
+        <span className="font-medium text-gray-700 truncate max-w-[120px] sm:max-w-none">
+          {workspace.name || 'My Workspace'}
+        </span>
       </div>
     </div>
   );

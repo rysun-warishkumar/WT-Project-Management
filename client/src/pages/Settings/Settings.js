@@ -411,49 +411,49 @@ const Settings = () => {
 
       {/* Tabs */}
       <div className="border-b border-gray-200">
-        <nav className="flex flex-wrap -mb-px space-x-1 sm:space-x-4 overflow-x-auto">
+        <nav className="flex flex-wrap gap-2 -mb-px">
           <button
             onClick={() => setActiveTab('profile')}
-            className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
+            className={`inline-flex items-center px-3 py-2 text-xs sm:text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
               activeTab === 'profile'
                 ? 'border-primary-600 text-primary-600'
                 : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
             }`}
           >
-            <User className="inline-block h-4 w-4 mr-2" />
+            <User className="inline-block h-4 w-4 mr-2 flex-shrink-0" />
             Profile Settings
           </button>
           <button
             onClick={() => setActiveTab('password')}
-            className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
+            className={`inline-flex items-center px-3 py-2 text-xs sm:text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
               activeTab === 'password'
                 ? 'border-primary-600 text-primary-600'
                 : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
             }`}
           >
-            <Lock className="inline-block h-4 w-4 mr-2" />
+            <Lock className="inline-block h-4 w-4 mr-2 flex-shrink-0" />
             Change Password
           </button>
           <button
             onClick={() => setActiveTab('account')}
-            className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
+            className={`inline-flex items-center px-3 py-2 text-xs sm:text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
               activeTab === 'account'
                 ? 'border-primary-600 text-primary-600'
                 : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
             }`}
           >
-            <Info className="inline-block h-4 w-4 mr-2" />
+            <Info className="inline-block h-4 w-4 mr-2 flex-shrink-0" />
             Account Information
           </button>
           <button
             onClick={() => setActiveTab('smtp')}
-            className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
+            className={`inline-flex items-center px-3 py-2 text-xs sm:text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
               activeTab === 'smtp'
                 ? 'border-primary-600 text-primary-600'
                 : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
             }`}
           >
-            <Mail className="inline-block h-4 w-4 mr-2" />
+            <Mail className="inline-block h-4 w-4 mr-2 flex-shrink-0" />
             SMTP Configuration
           </button>
         </nav>
