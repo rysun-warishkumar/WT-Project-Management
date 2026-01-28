@@ -1,11 +1,95 @@
 const nodemailer = require('nodemailer');
 require('dotenv').config();
+const https = require('https');
 
 // Email branding constants
 const APP_NAME = process.env.APP_NAME || 'W | Technology CMS';
 const COMPANY_NAME = 'W | Technology';
 const COMPANY_URL = 'https://wtechnology.in';
 const SUPPORT_EMAIL = 'info@wtechnology.in';
+
+const isSendGridSmtpConfig = (smtpConfig) => {
+  const host = (smtpConfig?.host || '').toLowerCase();
+  const user = (smtpConfig?.auth?.user || '').toLowerCase();
+  return host === 'smtp.sendgrid.net' && user === 'apikey';
+};
+
+const sendGridRequest = ({ method, path, apiKey, body }) => {
+  return new Promise((resolve, reject) => {
+    const payload = body ? JSON.stringify(body) : null;
+
+    const req = https.request(
+      {
+        hostname: 'api.sendgrid.com',
+        port: 443,
+        method,
+        path,
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+          ...(payload ? { 'Content-Length': Buffer.byteLength(payload) } : {}),
+        },
+      },
+      (res) => {
+        let data = '';
+        res.on('data', (chunk) => (data += chunk));
+        res.on('end', () => {
+          // SendGrid returns 202 for success on mail send, 200 for profile calls
+          const ok = res.statusCode && res.statusCode >= 200 && res.statusCode < 300;
+          if (!ok) {
+            return reject(
+              new Error(
+                `SendGrid API error (${res.statusCode}): ${data || 'No response body'}`
+              )
+            );
+          }
+          resolve({ statusCode: res.statusCode, body: data });
+        });
+      }
+    );
+
+    req.on('error', reject);
+    if (payload) req.write(payload);
+    req.end();
+  });
+};
+
+const verifySendGridApiKey = async (apiKey) => {
+  // Lightweight endpoint to validate the API key
+  await sendGridRequest({ method: 'GET', path: '/v3/user/profile', apiKey });
+  return true;
+};
+
+const sendViaSendGridApi = async (apiKey, mailOptions) => {
+  // Convert nodemailer-like options to SendGrid payload
+  // mailOptions.from may be `"Name" <email@domain.com>` or plain email
+  const fromRaw = mailOptions.from || '';
+  const fromMatch = fromRaw.match(/<([^>]+)>/);
+  const fromEmail = (fromMatch ? fromMatch[1] : fromRaw).trim();
+
+  const toRaw = mailOptions.to || '';
+  const to = Array.isArray(toRaw) ? toRaw : String(toRaw).split(',').map((s) => s.trim()).filter(Boolean);
+
+  if (!fromEmail) throw new Error('SendGrid: from email is required');
+  if (!to.length) throw new Error('SendGrid: to email is required');
+
+  const payload = {
+    personalizations: [
+      {
+        to: to.map((email) => ({ email })),
+        subject: mailOptions.subject || '',
+      },
+    ],
+    from: { email: fromEmail, name: APP_NAME },
+    content: [
+      ...(mailOptions.text ? [{ type: 'text/plain', value: mailOptions.text }] : []),
+      ...(mailOptions.html ? [{ type: 'text/html', value: mailOptions.html }] : []),
+    ],
+  };
+
+  await sendGridRequest({ method: 'POST', path: '/v3/mail/send', apiKey, body: payload });
+  return { messageId: 'sendgrid-api' };
+};
 
 // Reusable email footer HTML
 const getEmailFooter = () => {
@@ -97,6 +181,16 @@ const createTransporter = async () => {
   const smtpConfig = await getSmtpConfig();
 
   if (smtpConfig) {
+    // Render often blocks outbound SMTP ports. If user configured SendGrid SMTP
+    // using username "apikey", use SendGrid Web API over HTTPS (port 443) instead.
+    if (isSendGridSmtpConfig(smtpConfig)) {
+      const apiKey = smtpConfig.auth?.pass;
+      return {
+        verify: async () => verifySendGridApiKey(apiKey),
+        sendMail: async (options) => sendViaSendGridApi(apiKey, options),
+      };
+    }
+
     return nodemailer.createTransport({
       host: smtpConfig.host,
       port: smtpConfig.port,

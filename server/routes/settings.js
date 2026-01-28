@@ -221,6 +221,65 @@ router.post('/smtp/test', authorizePermission('settings', 'edit'), [
 
     const { host, port, secure, user, pass, from } = req.body;
 
+    // If configured for SendGrid SMTP (host smtp.sendgrid.net + user apikey),
+    // use SendGrid Web API over HTTPS (443). This works on Render even when SMTP ports are blocked.
+    if ((host || '').toLowerCase() === 'smtp.sendgrid.net' && (user || '').toLowerCase() === 'apikey') {
+      if (!from) {
+        return res.status(400).json({
+          success: false,
+          message: 'From email is required for SendGrid test (must be a verified sender in SendGrid).',
+        });
+      }
+
+      const https = require('https');
+      const sendGridRequest = ({ method, path, apiKey, body }) =>
+        new Promise((resolve, reject) => {
+          const payload = body ? JSON.stringify(body) : null;
+          const req2 = https.request(
+            {
+              hostname: 'api.sendgrid.com',
+              port: 443,
+              method,
+              path,
+              headers: {
+                Authorization: `Bearer ${apiKey}`,
+                'Content-Type': 'application/json',
+                ...(payload ? { 'Content-Length': Buffer.byteLength(payload) } : {}),
+              },
+            },
+            (resp) => {
+              let data = '';
+              resp.on('data', (chunk) => (data += chunk));
+              resp.on('end', () => {
+                const ok = resp.statusCode && resp.statusCode >= 200 && resp.statusCode < 300;
+                if (!ok) return reject(new Error(`SendGrid API error (${resp.statusCode}): ${data || 'No response body'}`));
+                resolve({ statusCode: resp.statusCode, body: data });
+              });
+            }
+          );
+          req2.on('error', reject);
+          if (payload) req2.write(payload);
+          req2.end();
+        });
+
+      // 1) Verify API key
+      await sendGridRequest({ method: 'GET', path: '/v3/user/profile', apiKey: pass });
+
+      // 2) Send a test email to the From address itself
+      const payload = {
+        personalizations: [{ to: [{ email: from }], subject: 'SMTP Configuration Test (SendGrid)' }],
+        from: { email: from },
+        content: [{ type: 'text/plain', value: 'This is a test email to verify SendGrid configuration.' }],
+      };
+      await sendGridRequest({ method: 'POST', path: '/v3/mail/send', apiKey: pass, body: payload });
+
+      return res.json({
+        success: true,
+        message: 'SendGrid connection successful (tested via API)',
+        data: { connection: true, testEmailSent: true },
+      });
+    }
+
     // Create temporary transporter for testing
     const nodemailer = require('nodemailer');
     const testTransporter = nodemailer.createTransport({
@@ -255,9 +314,12 @@ router.post('/smtp/test', authorizePermission('settings', 'edit'), [
     let testEmailSent = false;
     if (from) {
       try {
+        // If user is "apikey" (SendGrid SMTP username), it is NOT a valid recipient email.
+        // In that case, send the test email to the sender email instead.
+        const testRecipient = (String(user).toLowerCase() === 'apikey') ? from : user;
         await testTransporter.sendMail({
           from: from,
-          to: user, // Send test email to the SMTP user
+          to: testRecipient,
           subject: 'SMTP Configuration Test',
           text: 'This is a test email to verify SMTP configuration.',
           html: '<p>This is a test email to verify SMTP configuration.</p>'
