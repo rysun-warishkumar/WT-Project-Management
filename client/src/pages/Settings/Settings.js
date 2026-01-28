@@ -1048,13 +1048,15 @@ const Settings = () => {
                   <div className="relative">
                     <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
                     <input
-                      type="email"
+                      type="text"
                       id="smtp_user"
                       {...registerSmtp('user', {
                         required: watchSmtp('enabled') ? 'SMTP user email is required' : false,
-                        pattern: {
-                          value: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
-                          message: 'Please enter a valid email address',
+                        validate: (value) => {
+                          if (!watchSmtp('enabled')) return true;
+                          const v = String(value || '').trim();
+                          if (v === 'apikey') return true; // SendGrid SMTP username
+                          return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v) || 'Please enter a valid email address (or "apikey" for SendGrid)';
                         },
                       })}
                       className={`form-input w-full pl-10 ${
@@ -1062,7 +1064,7 @@ const Settings = () => {
                           ? 'border-red-300 focus:border-red-500 focus:ring-red-500'
                           : 'border-gray-300 focus:border-primary-500 focus:ring-primary-500'
                       }`}
-                      placeholder="your-email@example.com"
+                      placeholder="your-email@example.com (or apikey for SendGrid)"
                       disabled={!watchSmtp('enabled')}
                     />
                   </div>

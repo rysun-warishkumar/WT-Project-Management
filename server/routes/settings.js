@@ -96,7 +96,12 @@ router.put('/smtp', authorizePermission('settings', 'edit'), [
   body('host').optional().trim().isLength({ min: 1, max: 255 }).withMessage('Host must be between 1 and 255 characters'),
   body('port').optional().isInt({ min: 1, max: 65535 }).withMessage('Port must be between 1 and 65535'),
   body('secure').optional().isBoolean().withMessage('Secure must be a boolean'),
-  body('user').optional().trim().isEmail().withMessage('User must be a valid email'),
+  // SendGrid uses the literal username "apikey" for SMTP auth
+  body('user')
+    .optional()
+    .trim()
+    .custom((value) => value === 'apikey' || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value))
+    .withMessage('User must be a valid email or "apikey" (SendGrid)'),
   body('pass').optional().trim().isLength({ min: 1 }).withMessage('Password cannot be empty'),
   body('from').optional().trim().isEmail().withMessage('From must be a valid email'),
   body('enabled').optional().isBoolean().withMessage('Enabled must be a boolean')
@@ -196,7 +201,11 @@ router.put('/smtp', authorizePermission('settings', 'edit'), [
 router.post('/smtp/test', authorizePermission('settings', 'edit'), [
   body('host').notEmpty().withMessage('Host is required'),
   body('port').notEmpty().isInt({ min: 1, max: 65535 }).withMessage('Valid port is required'),
-  body('user').notEmpty().isEmail().withMessage('Valid email is required'),
+  // Accept either a real email (most providers) or "apikey" (SendGrid)
+  body('user')
+    .notEmpty()
+    .custom((value) => value === 'apikey' || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value))
+    .withMessage('Valid email or "apikey" (SendGrid) is required'),
   body('pass').notEmpty().withMessage('Password is required'),
   body('from').optional().isEmail().withMessage('From must be a valid email')
 ], async (req, res) => {
@@ -212,7 +221,7 @@ router.post('/smtp/test', authorizePermission('settings', 'edit'), [
 
     const { host, port, secure, user, pass, from } = req.body;
 
-    // Create temporary transporter for testing (simple configuration like before)
+    // Create temporary transporter for testing
     const nodemailer = require('nodemailer');
     const testTransporter = nodemailer.createTransport({
       host: host,
@@ -221,11 +230,26 @@ router.post('/smtp/test', authorizePermission('settings', 'edit'), [
       auth: {
         user: user,
         pass: pass
-      }
+      },
+      // Add reasonable timeouts to fail faster on blocked connections
+      connectionTimeout: 15000, // 15 seconds
+      greetingTimeout: 10000,   // 10 seconds
+      socketTimeout: 10000       // 10 seconds
     });
 
-    // Test connection (simple verify like before)
-    await testTransporter.verify();
+    // Test connection with timeout wrapper to prevent hanging
+    const verifyWithTimeout = (transporter, timeoutMs = 20000) => {
+      return Promise.race([
+        transporter.verify(),
+        new Promise((_, reject) => 
+          setTimeout(() => {
+            reject(new Error('Connection timeout: SMTP server did not respond. If you\'re using Render, they block outbound SMTP connections on ports 25, 587, and 465. Please use SendGrid (smtp.sendgrid.net, port 587) or another email service that works on Render.'));
+          }, timeoutMs)
+        )
+      ]);
+    };
+
+    await verifyWithTimeout(testTransporter, 20000);
 
     // Optionally send a test email
     let testEmailSent = false;
@@ -254,9 +278,18 @@ router.post('/smtp/test', authorizePermission('settings', 'edit'), [
     });
   } catch (error) {
     console.error('SMTP test error:', error);
+    
+    // Provide helpful error message for Render/hosting issues
+    let errorMessage = error.message || 'Unknown error occurred';
+    
+    // Check if it's a timeout or connection issue (common on Render)
+    if (errorMessage.includes('timeout') || errorMessage.includes('ETIMEDOUT') || errorMessage.includes('ECONNREFUSED')) {
+      errorMessage = `SMTP connection failed: ${errorMessage}. Note: Render blocks outbound SMTP connections. Use SendGrid (smtp.sendgrid.net, port 587) or Mailgun for email on Render.`;
+    }
+    
     res.status(400).json({
       success: false,
-      message: `SMTP connection failed: ${error.message}`,
+      message: errorMessage,
       error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
