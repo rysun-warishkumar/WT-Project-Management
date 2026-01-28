@@ -133,13 +133,10 @@ function App() {
                   </PublicRoute>
                 }
               />
+              {/* Email verification should always be accessible, even if auth state is inconsistent */}
               <Route
                 path="/verify-email"
-                element={
-                  <PublicRoute>
-                    <VerifyEmail />
-                  </PublicRoute>
-                }
+                element={<VerifyEmail />}
               />
               <Route
                 path="/resend-verification"
