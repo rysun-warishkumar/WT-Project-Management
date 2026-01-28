@@ -445,40 +445,76 @@ router.post('/register', registerValidation, async (req, res) => {
     const workspaceSlug = await generateUniqueSlug(workspace_name);
 
     // Create user, workspace, and workspace_member in a transaction
-    const result = await transaction(async (connection) => {
-      // 1. Create user (unverified)
-      const [userResult] = await connection.execute(
-        `INSERT INTO users (email, password, full_name, username, role, email_verified, email_verification_token, registration_source, is_active)
-         VALUES (?, ?, ?, ?, 'admin', FALSE, ?, 'web', TRUE)`,
-        [email.trim().toLowerCase(), hashedPassword, full_name.trim(), email.trim().toLowerCase(), verificationToken]
-      );
+    let result;
+    try {
+      result = await transaction(async (connection) => {
+        // 1. Create user (unverified)
+        const [userResult] = await connection.execute(
+          `INSERT INTO users (email, password, full_name, username, role, email_verified, email_verification_token, registration_source, is_active)
+           VALUES (?, ?, ?, ?, 'admin', FALSE, ?, 'web', TRUE)`,
+          [email.trim().toLowerCase(), hashedPassword, full_name.trim(), email.trim().toLowerCase(), verificationToken]
+        );
 
-      const userId = userResult.insertId;
+        const userId = userResult.insertId;
 
-      // 2. Create workspace
-      const [workspaceResult] = await connection.execute(
-        `INSERT INTO workspaces (name, slug, owner_id, plan_type, status)
-         VALUES (?, ?, ?, 'free', 'active')`,
-        [workspace_name.trim(), workspaceSlug, userId]
-      );
+        // 2. Create workspace
+        const [workspaceResult] = await connection.execute(
+          `INSERT INTO workspaces (name, slug, owner_id, plan_type, status)
+           VALUES (?, ?, ?, 'free', 'active')`,
+          [workspace_name.trim(), workspaceSlug, userId]
+        );
 
-      const workspaceId = workspaceResult.insertId;
+        const workspaceId = workspaceResult.insertId;
 
-      // 3. Update user with workspace_id
-      await connection.execute(
-        'UPDATE users SET workspace_id = ? WHERE id = ?',
-        [workspaceId, userId]
-      );
+        // 3. Update user with workspace_id
+        await connection.execute(
+          'UPDATE users SET workspace_id = ? WHERE id = ?',
+          [workspaceId, userId]
+        );
 
-      // 4. Create workspace member (user as admin)
-      await connection.execute(
-        `INSERT INTO workspace_members (workspace_id, user_id, role, status, joined_at)
-         VALUES (?, ?, 'admin', 'active', NOW())`,
-        [workspaceId, userId]
-      );
+        // 4. Create workspace member (user as admin)
+        await connection.execute(
+          `INSERT INTO workspace_members (workspace_id, user_id, role, status, joined_at)
+           VALUES (?, ?, 'admin', 'active', NOW())`,
+          [workspaceId, userId]
+        );
 
-      return { userId, workspaceId, verificationToken };
-    });
+        return { userId, workspaceId, verificationToken };
+      });
+    } catch (dbError) {
+      console.error('Registration transaction error:', dbError);
+
+      // Handle duplicate/constraint errors with clearer messages
+      if (dbError.code === 'ER_DUP_ENTRY') {
+        const msg = String(dbError.message || '').toLowerCase();
+
+        if (msg.includes('workspaces.slug')) {
+          return res.status(400).json({
+            success: false,
+            message: 'A workspace with a similar name already exists. Please choose a different workspace name.',
+          });
+        }
+
+        if (msg.includes('users.email') || msg.includes('users.username')) {
+          return res.status(400).json({
+            success: false,
+            message: 'This email is already associated with another account.',
+          });
+        }
+
+        // Generic duplicate entry fallback
+        return res.status(400).json({
+          success: false,
+          message: 'Unable to complete registration due to a duplicate record. Please try a different email or workspace name.',
+        });
+      }
+
+      // Unknown DB error – surface a generic 500
+      return res.status(500).json({
+        success: false,
+        message: 'Registration failed due to a database error. Please try again.',
+      });
+    }
 
     // Send verification email
     let emailSent = false;

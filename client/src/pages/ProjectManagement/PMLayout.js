@@ -61,7 +61,7 @@ const PMLayout = ({ children, workspace }) => {
         className={`
           fixed left-0 top-0 h-screen bg-white border-r border-gray-200 z-40
           transition-all duration-300 ease-in-out
-          ${isCollapsed ? 'w-20' : 'w-64'}
+          ${isCollapsed ? 'w-16 sm:w-20' : 'w-56 sm:w-64'}
           flex flex-col
           overflow-hidden
         `}
@@ -159,7 +159,7 @@ const PMLayout = ({ children, workspace }) => {
       {/* Main Content Area */}
       <div className={`
         flex-1 flex flex-col transition-all duration-300 ease-in-out
-        ${isCollapsed ? 'ml-20' : 'ml-64'}
+        ${isCollapsed ? 'ml-16 sm:ml-20' : 'ml-56 sm:ml-64'}
       `}>
         {/* Header */}
         <header className="bg-white border-b border-gray-200 sticky top-0 z-30">
@@ -169,7 +169,7 @@ const PMLayout = ({ children, workspace }) => {
                 {!isCollapsed && (
                   <>
                     <div className="hidden md:block">
-                      <h1 className="text-xl font-semibold text-gray-900">
+                      <h1 className="text-lg md:text-xl font-semibold text-gray-900">
                         {workspace?.name || 'Project Management'}
                       </h1>
                       {workspace?.project_title && (
@@ -182,7 +182,7 @@ const PMLayout = ({ children, workspace }) => {
                 )}
                 {isCollapsed && (
                   <div>
-                    <h1 className="text-xl font-semibold text-gray-900">
+                    <h1 className="text-lg md:text-xl font-semibold text-gray-900">
                       {workspace?.name || 'Project Management'}
                     </h1>
                     {workspace?.project_title && (
