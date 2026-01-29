@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import {
   BookOpen,
@@ -28,6 +28,14 @@ import {
 
 const Guide = () => {
   const [expandedSection, setExpandedSection] = useState(null);
+  // When a section is expanded, scroll it into view (e.g. after clicking a quick nav tile)
+  useEffect(() => {
+    if (!expandedSection) return;
+    const el = document.getElementById(`module-${expandedSection}`);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }, [expandedSection]);
 
   /**
    * MODULES CONFIGURATION
@@ -393,14 +401,15 @@ const Guide = () => {
             {modules.map((module) => {
               const Icon = module.icon;
               return (
-                <Link
+                <button
                   key={module.id}
-                  to={module.route}
-                  className="flex flex-col items-center p-4 bg-gray-50 hover:bg-primary-50 rounded-lg transition-colors border border-gray-200 hover:border-primary-300"
+                  type="button"
+                  onClick={() => setExpandedSection(module.id)}
+                  className="flex flex-col items-center p-4 bg-gray-50 hover:bg-primary-50 rounded-lg transition-colors border border-gray-200 hover:border-primary-300 text-left cursor-pointer"
                 >
                   <Icon className="h-6 w-6 text-primary-600 mb-2" />
                   <span className="text-sm font-medium text-gray-700 text-center">{module.name}</span>
-                </Link>
+                </button>
               );
             })}
           </div>
@@ -415,7 +424,7 @@ const Guide = () => {
           const isExpanded = expandedSection === module.id;
 
           return (
-            <div key={module.id} className="card">
+            <div key={module.id} id={`module-${module.id}`} className="card scroll-mt-4">
               <div
                 className="card-header cursor-pointer hover:bg-gray-50 transition-colors"
                 onClick={() => toggleSection(module.id)}

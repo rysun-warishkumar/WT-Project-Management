@@ -67,9 +67,14 @@ const InvoiceModal = ({ isOpen, onClose, onSuccess, invoice }) => {
   const watchedItems = watch('items');
   const watchedTaxRate = watch('tax_rate');
 
+  // Stable signature so effect only runs when item qty/price actually change (avoids infinite loop from new array refs)
+  const itemsSignature = (watchedItems || [])
+    .map((item) => `${parseFloat(item.quantity) || 0}-${parseFloat(item.unit_price) || 0}`)
+    .join(',');
+
   // Calculate totals when items or tax rate changes
   useEffect(() => {
-    const subtotal = watchedItems.reduce((sum, item) => {
+    const subtotal = (watchedItems || []).reduce((sum, item) => {
       const quantity = parseFloat(item.quantity) || 0;
       const unitPrice = parseFloat(item.unit_price) || 0;
       return sum + (quantity * unitPrice);
@@ -82,9 +87,10 @@ const InvoiceModal = ({ isOpen, onClose, onSuccess, invoice }) => {
     setValue('subtotal', subtotal);
     setValue('tax_amount', taxAmount);
     setValue('total_amount', totalAmount);
-  }, [watchedItems, watchedTaxRate, setValue]);
+  }, [itemsSignature, watchedTaxRate, setValue]);
 
-  // Reset form when invoice prop changes
+  // Reset form when invoice prop changes (use stable id so we don't run on every parent re-render)
+  const invoiceId = invoice?.id ?? null;
   useEffect(() => {
     if (invoice) {
       reset({
@@ -121,7 +127,7 @@ const InvoiceModal = ({ isOpen, onClose, onSuccess, invoice }) => {
         items: [{ item_name: '', description: '', quantity: 1, unit_price: 0, total_price: 0 }]
       });
     }
-  }, [invoice, reset, projects, quotations]);
+  }, [invoiceId, reset]);
 
   // Create/Update mutation
   const mutation = useMutation(

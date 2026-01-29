@@ -1042,23 +1042,32 @@ router.get('/:id/download', authorizePermission('invoices', 'view'), async (req,
     // Pipe PDF to response
     doc.pipe(res);
 
-    // Constants for layout
+    // Constants for layout (A4 = 595.28 x 841.89 pts; keep all content within contentWidth)
     const pageWidth = doc.page.width;
     const pageHeight = doc.page.height;
     const margin = 40;
-    const contentWidth = pageWidth - (margin * 2);
+    const contentWidth = Math.min(pageWidth - (margin * 2), 515); // cap so table/summary never overflow
     const maxContentHeight = pageHeight - (margin * 2);
     
+    // Table column layout - must fit within contentWidth (515)
+    const colLayout = {
+      item: { x: margin + 5, width: 72 },
+      desc: { x: margin + 82, width: 228 },
+      qty: { x: margin + 315, width: 32 },
+      unit: { x: margin + 352, width: 78 },
+      total: { x: margin + 435, width: 78 }
+    };
+
     // Calculate available space for items (reserve space for header, from/to, summary, status badge, payment method, footer)
     const headerHeight = 85;
     const fromToHeight = 110;
-    const summaryHeight = 180; // Increased to include status badge
+    const summaryHeight = 180;
     const paymentMethodHeight = 20;
-    const footerHeight = 60; // Increased for enhanced footer
+    const footerHeight = 60;
     const tableHeaderHeight = 28;
-    const itemRowHeight = 28;
+    const itemRowMinHeight = 28;
     const availableHeightForItems = maxContentHeight - headerHeight - fromToHeight - summaryHeight - paymentMethodHeight - footerHeight - tableHeaderHeight;
-    const maxItemsPerPage = Math.max(1, Math.floor(availableHeightForItems / itemRowHeight));
+    const maxItemsPerPage = Math.max(1, Math.floor(availableHeightForItems / (itemRowMinHeight + 12))); // assume some rows may be taller for wrapped desc
 
     // Helper function to add header to each page
     const addPageHeader = (pageNum = 1) => {
@@ -1070,12 +1079,13 @@ router.get('/:id/download', authorizePermission('invoices', 'view'), async (req,
       doc.fontSize(28).font('Helvetica-Bold').fillColor('#111827');
       doc.text('INVOICE', margin, margin + 10);
       
-      // Invoice details (right aligned)
+      // Invoice details (right aligned, within content width)
       doc.fontSize(10).font('Helvetica').fillColor('#6B7280');
-      const rightX = pageWidth - margin - 200;
-      doc.text(`Invoice #: ${invoice.invoice_number}`, rightX, margin + 15, { width: 200, align: 'right' });
-      doc.text(`Date: ${new Date(invoice.invoice_date).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}`, rightX, margin + 30, { width: 200, align: 'right' });
-      doc.text(`Due Date: ${new Date(invoice.due_date).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}`, rightX, margin + 45, { width: 200, align: 'right' });
+      const contentRight = margin + contentWidth;
+      const headerBlockWidth = 200;
+      doc.text(`Invoice #: ${invoice.invoice_number}`, contentRight, margin + 15, { width: headerBlockWidth, align: 'right' });
+      doc.text(`Date: ${new Date(invoice.invoice_date).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}`, contentRight, margin + 30, { width: headerBlockWidth, align: 'right' });
+      doc.text(`Due Date: ${new Date(invoice.due_date).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}`, contentRight, margin + 45, { width: headerBlockWidth, align: 'right' });
     };
 
     // Helper function to add from/to section
@@ -1088,127 +1098,107 @@ router.get('/:id/download', authorizePermission('invoices', 'view'), async (req,
       doc.fontSize(9).fillColor('#6B7280').font('Helvetica');
       doc.text('System Administrator', margin, startY + 28);
       
-      // To section
-      const toX = margin + 300;
+      // To section (within content width)
+      const toX = margin + 280;
+      const toBlockWidth = Math.max(200, (margin + contentWidth) - toX - 5);
       doc.fontSize(9).fillColor('#6B7280').font('Helvetica-Bold');
       doc.text('BILL TO:', toX, startY);
       doc.fontSize(12).fillColor('#111827').font('Helvetica-Bold');
-      doc.text(invoice.client_name || '', toX, startY + 14);
-      
+      doc.text((invoice.client_name || '').toString(), toX, startY + 14, { width: toBlockWidth, ellipsis: true });
+
       let toY = startY + 28;
       if (invoice.client_company) {
         doc.fontSize(10).fillColor('#374151').font('Helvetica');
-        doc.text(invoice.client_company, toX, toY);
+        doc.text(invoice.client_company.toString(), toX, toY, { width: toBlockWidth, ellipsis: true });
         toY += 14;
       }
       if (invoice.client_address) {
         doc.fontSize(9).fillColor('#6B7280').font('Helvetica');
-        const addressLines = doc.heightOfString(invoice.client_address, { width: 210 });
-        doc.text(invoice.client_address, toX, toY, { width: 210 });
+        const addressLines = doc.heightOfString(invoice.client_address.toString(), { width: toBlockWidth });
+        doc.text(invoice.client_address.toString(), toX, toY, { width: toBlockWidth });
         toY += Math.max(12, addressLines);
       }
       if (invoice.client_city || invoice.client_state || invoice.client_postal_code) {
         const cityState = [invoice.client_city, invoice.client_state, invoice.client_postal_code].filter(Boolean).join(', ');
-        doc.text(cityState, toX, toY);
+        doc.text(cityState, toX, toY, { width: toBlockWidth, ellipsis: true });
         toY += 12;
       }
       if (invoice.client_email) {
-        doc.text(`Email: ${invoice.client_email}`, toX, toY);
+        doc.text(`Email: ${invoice.client_email}`, toX, toY, { width: toBlockWidth, ellipsis: true });
         toY += 12;
       }
       if (invoice.client_phone) {
-        doc.text(`Phone: ${invoice.client_phone}`, toX, toY);
+        doc.text(`Phone: ${invoice.client_phone}`, toX, toY, { width: toBlockWidth, ellipsis: true });
       }
     };
 
     // Helper function to add table header
     const addTableHeader = (y) => {
       const tableLeft = margin;
-      const tableWidth = contentWidth;
       const headerHeight = 28;
-      
-      // Define column positions for consistent alignment
-      const colItem = tableLeft + 10;
-      const colItemWidth = 200;
-      const colDesc = tableLeft + 220;
-      const colDescWidth = 200;
-      const colQty = tableLeft + 430;
-      const colQtyWidth = 40;
-      const colUnit = tableLeft + 480;
-      const colUnitWidth = 70;
-      const colTotal = tableLeft + 560;
-      const colTotalWidth = 55;
-      
-      // Header background with rounded top corners effect
-      doc.rect(tableLeft, y, tableWidth, headerHeight).fill('#4F46E5');
-      
-      // Header text - aligned to match content columns
+
+      doc.rect(tableLeft, y, contentWidth, headerHeight).fill('#4F46E5');
       doc.fontSize(10).fillColor('#FFFFFF').font('Helvetica-Bold');
-      doc.text('Item', colItem, y + 9, { width: colItemWidth });
-      doc.text('Description', colDesc, y + 9, { width: colDescWidth });
-      doc.text('Qty', colQty, y + 9, { width: colQtyWidth, align: 'right' });
-      doc.text('Unit Price', colUnit, y + 9, { width: colUnitWidth, align: 'right' });
-      doc.text('Total', colTotal, y + 9, { width: colTotalWidth, align: 'right' });
+      doc.text('Item', colLayout.item.x, y + 9, { width: colLayout.item.width });
+      doc.text('Description', colLayout.desc.x, y + 9, { width: colLayout.desc.width });
+      doc.text('Qty', colLayout.qty.x, y + 9, { width: colLayout.qty.width, align: 'right' });
+      doc.text('Unit Price', colLayout.unit.x, y + 9, { width: colLayout.unit.width, align: 'right' });
+      doc.text('Total', colLayout.total.x, y + 9, { width: colLayout.total.width, align: 'right' });
     };
 
-    // Helper function to add summary section
+    // Helper function to add summary section (all content within contentWidth)
     const addSummarySection = (y) => {
+      const summaryWidth = Math.min(200, contentWidth - 20);
       const summaryRight = margin + contentWidth;
-      const summaryWidth = 220;
       const summaryLeft = summaryRight - summaryWidth;
-      
-      // Calculate values
+      const labelWidth = 85;
+      const valueWidth = 105;
+
       const subtotal = parseFloat(invoice.subtotal) || 0;
       const taxRate = parseFloat(invoice.tax_rate) || 0;
       const taxAmount = parseFloat(invoice.tax_amount) || 0;
       const totalAmount = parseFloat(invoice.total_amount) || 0;
       const paidAmount = parseFloat(invoice.paid_amount) || 0;
       const outstanding = Math.max(0, totalAmount - paidAmount);
-      
-      // Summary box with border - adjust height based on whether we show paid/outstanding
+
       const boxHeight = 140;
       doc.strokeColor('#E5E7EB').lineWidth(1);
-      doc.rect(summaryLeft - 15, y - 10, summaryWidth, boxHeight).stroke();
+      doc.rect(summaryLeft, y - 10, summaryWidth, boxHeight).stroke();
       doc.fillColor('#FAFBFC');
-      doc.rect(summaryLeft - 15, y - 10, summaryWidth, boxHeight).fill();
-      
-      // Summary title
+      doc.rect(summaryLeft, y - 10, summaryWidth, boxHeight).fill();
+
       doc.fontSize(10).font('Helvetica-Bold').fillColor('#111827');
-      doc.text('Summary', summaryLeft - 10, y - 5);
-      
-      // Divider line
+      doc.text('Summary', summaryLeft + 5, y - 5);
+
       doc.strokeColor('#E5E7EB').lineWidth(0.5);
-      doc.moveTo(summaryLeft - 10, y + 8).lineTo(summaryRight - 5, y + 8).stroke();
-      
-      // Ensure text is visible with proper color
+      doc.moveTo(summaryLeft, y + 8).lineTo(summaryRight, y + 8).stroke();
+
+      // Value box must end at summaryRight (PDFKit uses x as left edge of box, so x = summaryRight - valueWidth)
+      const valueX = summaryRight - valueWidth;
+
       doc.fontSize(10).font('Helvetica').fillColor('#111827');
-      doc.text('Subtotal:', summaryLeft, y + 15, { width: 100, align: 'right' });
-      doc.fillColor('#111827');
-      doc.text(formatCurrency(subtotal, invoice.currency), summaryRight, y + 15, { width: 100, align: 'right' });
-      
-      doc.fillColor('#111827');
-      doc.text(`Tax (${taxRate.toFixed(2)}%):`, summaryLeft, y + 32, { width: 100, align: 'right' });
-      doc.text(formatCurrency(taxAmount, invoice.currency), summaryRight, y + 32, { width: 100, align: 'right' });
-      
-      // Total with emphasis
+      doc.text('Subtotal:', summaryLeft + 5, y + 15, { width: labelWidth, align: 'right' });
+      doc.text(formatCurrencyForPdf(subtotal, invoice.currency), valueX, y + 15, { width: valueWidth, align: 'right' });
+
+      doc.text(`Tax (${taxRate.toFixed(2)}%):`, summaryLeft + 5, y + 32, { width: labelWidth, align: 'right' });
+      doc.text(formatCurrencyForPdf(taxAmount, invoice.currency), valueX, y + 32, { width: valueWidth, align: 'right' });
+
       doc.strokeColor('#E5E7EB').lineWidth(0.5);
-      doc.moveTo(summaryLeft - 10, y + 48).lineTo(summaryRight - 5, y + 48).stroke();
-      
+      doc.moveTo(summaryLeft, y + 48).lineTo(summaryRight, y + 48).stroke();
+
       doc.fontSize(13).font('Helvetica-Bold').fillColor('#111827');
-      doc.text('Total:', summaryLeft, y + 55, { width: 100, align: 'right' });
-      doc.text(formatCurrency(totalAmount, invoice.currency), summaryRight, y + 55, { width: 100, align: 'right' });
-      
-      // Always show Paid and Outstanding
+      doc.text('Total:', summaryLeft + 5, y + 55, { width: labelWidth, align: 'right' });
+      doc.text(formatCurrencyForPdf(totalAmount, invoice.currency), valueX, y + 55, { width: valueWidth, align: 'right' });
+
       doc.fontSize(10).font('Helvetica').fillColor('#111827');
-      doc.text('Paid:', summaryLeft, y + 75, { width: 100, align: 'right' });
-      doc.text(formatCurrency(paidAmount, invoice.currency), summaryRight, y + 75, { width: 100, align: 'right' });
-      
+      doc.text('Paid:', summaryLeft + 5, y + 75, { width: labelWidth, align: 'right' });
+      doc.text(formatCurrencyForPdf(paidAmount, invoice.currency), valueX, y + 75, { width: valueWidth, align: 'right' });
+
       doc.fontSize(10).font('Helvetica-Bold').fillColor(outstanding > 0 ? '#DC2626' : '#10B981');
-      doc.text('Outstanding:', summaryLeft, y + 92, { width: 100, align: 'right' });
-      doc.text(formatCurrency(outstanding, invoice.currency), summaryRight, y + 92, { width: 100, align: 'right' });
-      
-      // Add status badge below summary
-      const statusY = y + 150;
+      doc.text('Outstanding:', summaryLeft + 5, y + 92, { width: labelWidth, align: 'right' });
+      doc.text(formatCurrencyForPdf(outstanding, invoice.currency), valueX, y + 92, { width: valueWidth, align: 'right' });
+
+      const statusY = y + 118;
       const statusColors = {
         'draft': '#9CA3AF',
         'sent': '#3B82F6',
@@ -1219,12 +1209,12 @@ router.get('/:id/download', authorizePermission('invoices', 'view'), async (req,
       };
       const statusColor = statusColors[invoice.status] || '#6B7280';
       const statusText = invoice.status ? invoice.status.charAt(0).toUpperCase() + invoice.status.slice(1) : 'Draft';
-      const statusWidth = 100;
-      const statusX = summaryRight - statusWidth;
-      
-      doc.roundedRect(statusX, statusY, statusWidth, 18, 4).fill(statusColor);
+      const badgeWidth = Math.min(90, summaryWidth - 10);
+      const statusX = summaryRight - badgeWidth - 5;
+
+      doc.roundedRect(statusX, statusY, badgeWidth, 18, 4).fill(statusColor);
       doc.fontSize(9).fillColor('#FFFFFF').font('Helvetica-Bold');
-      doc.text(statusText, statusX + 5, statusY + 5, { width: 90, align: 'center' });
+      doc.text(statusText, statusX + 4, statusY + 5, { width: badgeWidth - 8, align: 'center' });
     };
 
     // Helper function to add payment method section
@@ -1296,55 +1286,43 @@ router.get('/:id/download', authorizePermission('invoices', 'view'), async (req,
       const tableHeaderY = fromToY + 110;
       addTableHeader(tableHeaderY);
 
-      // Add items
+      // Add items (columns and description wrap within contentWidth)
       let currentY = tableHeaderY + 28;
       const tableLeft = margin;
-      const tableWidth = contentWidth;
 
       if (pageItems.length > 0) {
         pageItems.forEach((item, index) => {
-          // Check if we need a new page
-          if (currentY + itemRowHeight > pageHeight - margin - summaryHeight - paymentMethodHeight - footerHeight && pageNum < totalPages) {
-            // This shouldn't happen due to our calculation, but as a safety check
+          const descText = (item.description || 'N/A').toString();
+          doc.fontSize(8);
+          const descHeight = Math.ceil(doc.heightOfString(descText, { width: colLayout.desc.width }));
+          const rowHeight = Math.max(itemRowMinHeight, descHeight + 14);
+
+          if (currentY + rowHeight > pageHeight - margin - summaryHeight - paymentMethodHeight - footerHeight && pageNum < totalPages) {
             return;
           }
-          
+
           const bgColor = (startIndex + index) % 2 === 0 ? '#F9FAFB' : '#FFFFFF';
-          doc.rect(tableLeft, currentY, tableWidth, itemRowHeight).fill(bgColor);
-          
-          // Use same column positions as header for alignment
-          const colItem = tableLeft + 10;
-          const colItemWidth = 200;
-          const colDesc = tableLeft + 220;
-          const colDescWidth = 200;
-          const colQty = tableLeft + 430;
-          const colQtyWidth = 40;
-          const colUnit = tableLeft + 480;
-          const colUnitWidth = 70;
-          const colTotal = tableLeft + 560;
-          const colTotalWidth = 55;
-          
+          doc.rect(tableLeft, currentY, contentWidth, rowHeight).fill(bgColor);
+
           doc.fontSize(9).fillColor('#111827').font('Helvetica');
-          doc.text(item.item_name || 'N/A', colItem, currentY + 9, { width: colItemWidth, ellipsis: true });
-          
-          // Handle long descriptions with wrapping
-          const descText = item.description || 'N/A';
+          doc.text((item.item_name || 'N/A').toString(), colLayout.item.x, currentY + 8, { width: colLayout.item.width, ellipsis: true });
+
           doc.fillColor('#6B7280').fontSize(8);
-          doc.text(descText, colDesc, currentY + 9, { width: colDescWidth, ellipsis: true });
-          
+          doc.text(descText, colLayout.desc.x, currentY + 8, { width: colLayout.desc.width });
+
           doc.fillColor('#111827').fontSize(9);
-          doc.text(String(item.quantity || 0), colQty, currentY + 9, { width: colQtyWidth, align: 'right' });
-          doc.text(formatCurrency(item.unit_price || 0, invoice.currency), colUnit, currentY + 9, { width: colUnitWidth, align: 'right' });
+          doc.text(String(item.quantity || 0), colLayout.qty.x, currentY + 8, { width: colLayout.qty.width, align: 'right' });
+          doc.text(formatCurrencyForPdf(item.unit_price || 0, invoice.currency), colLayout.unit.x, currentY + 8, { width: colLayout.unit.width, align: 'right' });
           doc.font('Helvetica-Bold');
-          doc.text(formatCurrency(item.total_price || 0, invoice.currency), colTotal, currentY + 9, { width: colTotalWidth, align: 'right' });
-          
-          currentY += itemRowHeight;
+          doc.text(formatCurrencyForPdf(item.total_price || 0, invoice.currency), colLayout.total.x, currentY + 8, { width: colLayout.total.width, align: 'right' });
+
+          currentY += rowHeight;
         });
       } else {
-        doc.rect(tableLeft, currentY, tableWidth, itemRowHeight).fill('#F9FAFB');
+        doc.rect(tableLeft, currentY, contentWidth, itemRowMinHeight).fill('#F9FAFB');
         doc.fontSize(9).fillColor('#6B7280').font('Helvetica');
-        doc.text('No items', tableLeft + 10, currentY + 9);
-        currentY += itemRowHeight;
+        doc.text('No items', colLayout.item.x, currentY + 9);
+        currentY += itemRowMinHeight;
       }
 
       // Add summary section (only on last page)
@@ -1424,6 +1402,22 @@ function formatCurrency(amount, currency = 'USD') {
       currency: 'USD',
     }).format(amount || 0);
   }
+}
+
+// PDF-safe currency format: use ASCII-only prefix so symbols like ₹ render correctly in Helvetica
+function formatCurrencyForPdf(amount, currency = 'USD') {
+  let currencyCode = (currency || 'USD').toUpperCase().trim();
+  const currencyMap = { '₹': 'INR', '$': 'USD', '€': 'EUR', '£': 'GBP', '¥': 'JPY' };
+  if (currencyMap[currencyCode]) currencyCode = currencyMap[currencyCode];
+  if (currencyCode.length !== 3 || !/^[A-Z]{3}$/.test(currencyCode)) currencyCode = 'USD';
+
+  const num = Number(amount) || 0;
+  const formatted = new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(num);
+  if (currencyCode === 'INR') return `INR ${formatted}`;
+  if (currencyCode === 'USD') return `$${formatted}`;
+  if (currencyCode === 'EUR') return `EUR ${formatted}`;
+  if (currencyCode === 'GBP') return `GBP ${formatted}`;
+  return `${currencyCode} ${formatted}`;
 }
 
 module.exports = router;
