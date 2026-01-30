@@ -467,6 +467,19 @@ router.post('/', authorizePermission('projects', 'create'), validateProject, asy
 
     const projectId = result.insertId;
 
+    // Auto-assign the creating user to this project so they appear in user_projects (Users list "Projects" count)
+    try {
+      await dbQuery(
+        'INSERT INTO user_projects (user_id, project_id) VALUES (?, ?)',
+        [req.user.id, projectId]
+      );
+    } catch (err) {
+      // Ignore duplicate or missing table; project was still created
+      if (err.code !== 'ER_DUP_ENTRY' && err.code !== 'ER_NO_SUCH_TABLE') {
+        console.warn('Could not assign creator to project:', err.message);
+      }
+    }
+
     // Fetch the created project
     const projects = await dbQuery(
       `SELECT 

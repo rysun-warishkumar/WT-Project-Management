@@ -35,6 +35,8 @@ const pmCicdRoutes = require('./routes/pm/cicd');
 const pmReferenceRoutes = require('./routes/pm/reference');
 const pmAssignmentRoutes = require('./routes/pm/assignments');
 const pmChatRoutes = require('./routes/pm/chat');
+const subscriptionRoutes = require('./routes/subscriptions');
+const inquiryRoutes = require('./routes/inquiries');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -54,12 +56,14 @@ const isOriginAllowed = (origin) => {
   // Exact match in allowed origins list
   if (corsAllowedOrigins.includes(origin)) return true;
   
-  // Development mode - allow localhost
+  // Development mode - allow localhost (client app 3000/3001, marketing site Vite 5173)
   if (process.env.NODE_ENV !== 'production') {
     return origin === 'http://localhost:3000' ||
            origin === 'http://127.0.0.1:3000' ||
            origin === 'http://localhost:3001' ||
-           origin === 'http://127.0.0.1:3001';
+           origin === 'http://127.0.0.1:3001' ||
+           origin === 'http://localhost:5173' ||
+           origin === 'http://127.0.0.1:5173';
   }
   
   // Production mode - check if origin matches Render pattern
@@ -189,6 +193,8 @@ app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/roles', roleRoutes);
 app.use('/api/reports', reportRoutes);
+app.use('/api/subscriptions', subscriptionRoutes);
+app.use('/api/inquiries', inquiryRoutes);
 app.use('/api/pm/workspaces', pmWorkspaceRoutes);
 app.use('/api/pm/user-stories', pmUserStoryRoutes);
 app.use('/api/pm/tasks', pmTaskRoutes);

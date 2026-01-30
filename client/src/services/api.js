@@ -32,6 +32,17 @@ api.interceptors.response.use(
   }
 );
 
+// Subscriptions (tenant workspaces) – super admin only
+export const subscriptionsAPI = {
+  getAll: () => api.get('/subscriptions'),
+  updateTrial: (workspaceId, data) => api.patch(`/subscriptions/${workspaceId}/trial`, data),
+};
+
+// Inquiries from public website contact form – super admin only
+export const inquiriesAPI = {
+  getAll: () => api.get('/inquiries'),
+};
+
 // Auth API
 export const authAPI = {
   login: (credentials) => api.post('/auth/login', credentials),

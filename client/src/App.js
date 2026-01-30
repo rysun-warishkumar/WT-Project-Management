@@ -31,6 +31,8 @@ import Roles from './pages/Roles/Roles';
 import Reports from './pages/Reports/Reports';
 import Guide from './pages/Guide/Guide';
 import Settings from './pages/Settings/Settings';
+import Subscriptions from './pages/Subscriptions/Subscriptions';
+import Inquiries from './pages/Inquiries/Inquiries';
 import Workspace from './pages/ProjectManagement/Workspace';
 
 // Context
@@ -182,6 +184,8 @@ function App() {
                 <Route path="reports" element={<Reports />} />
                 <Route path="guide" element={<Guide />} />
                 <Route path="settings" element={<Settings />} />
+                <Route path="subscriptions" element={<Subscriptions />} />
+                <Route path="inquiries" element={<Inquiries />} />
               </Route>
 
               {/* Project Management Routes (separate layout) */}

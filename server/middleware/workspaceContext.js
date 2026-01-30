@@ -4,6 +4,7 @@
  */
 
 const { query } = require('../config/database');
+const { isWorkspaceAccessAllowed } = require('../utils/workspaceUtils');
 
 /**
  * Middleware to ensure workspace context is set
@@ -61,9 +62,9 @@ const workspaceContext = async (req, res, next) => {
       });
     }
 
-    // Verify workspace exists and is active
+    // Verify workspace exists, is active, and trial/subscription allows access
     const workspaces = await query(
-      'SELECT id, name, status FROM workspaces WHERE id = ?',
+      'SELECT id, name, status, trial_ends_at, subscription_id FROM workspaces WHERE id = ?',
       [workspaceId]
     );
 
@@ -80,6 +81,16 @@ const workspaceContext = async (req, res, next) => {
       return res.status(403).json({
         success: false,
         message: 'Workspace is not active'
+      });
+    }
+
+    const access = isWorkspaceAccessAllowed(workspace);
+    if (!access.allowed && access.reason === 'trial_expired') {
+      return res.status(403).json({
+        success: false,
+        message: 'Your free trial has ended. Please upgrade or contact sales to continue.',
+        code: 'TRIAL_EXPIRED',
+        trial_ends_at: access.trial_ends_at,
       });
     }
 

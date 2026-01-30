@@ -4,7 +4,7 @@ const crypto = require('crypto');
 const { body, validationResult } = require('express-validator');
 const { query, transaction } = require('../config/database');
 const { authenticateToken, generateToken } = require('../middleware/auth');
-const { generateUniqueSlug, getUserWorkspaceContext } = require('../utils/workspaceUtils');
+const { generateUniqueSlug, getUserWorkspaceContext, isWorkspaceAccessAllowed } = require('../utils/workspaceUtils');
 const { sendVerificationEmail } = require('../utils/email');
 
 const router = express.Router();
@@ -71,14 +71,43 @@ router.post('/login', loginValidation, async (req, res) => {
 
     // Get workspace context
     const workspaceContext = await getUserWorkspaceContext(user.id);
-    
+
+    // Block login if workspace trial expired and no subscription
+    if (workspaceContext) {
+      const access = isWorkspaceAccessAllowed({
+        subscription_id: workspaceContext.subscription_id,
+        trial_ends_at: workspaceContext.trial_ends_at,
+      });
+      if (!access.allowed && access.reason === 'trial_expired') {
+        return res.status(403).json({
+          success: false,
+          message: 'Your free trial has ended. Please upgrade or contact sales to continue.',
+          code: 'TRIAL_EXPIRED',
+          trial_ends_at: access.trial_ends_at,
+        });
+      }
+    }
+
     // Generate token with workspace context
     const token = await generateToken(user.id, workspaceContext ? workspaceContext.workspace_id : null);
 
     // Remove password from response
     const { password: _, ...userWithoutPassword } = user;
 
-    // Prepare response with workspace info
+    // Prepare response with workspace info (include trial/subscription status for UI)
+    const workspacePayload = workspaceContext ? {
+      id: workspaceContext.workspace_id,
+      name: workspaceContext.workspace_name,
+      slug: workspaceContext.workspace_slug,
+      role: workspaceContext.workspace_role,
+      trial_ends_at: workspaceContext.trial_ends_at || null,
+      subscription_id: workspaceContext.subscription_id || null,
+      trial_active: isWorkspaceAccessAllowed({
+        subscription_id: workspaceContext.subscription_id,
+        trial_ends_at: workspaceContext.trial_ends_at,
+      }).allowed,
+    } : null;
+
     const responseData = {
       user: {
         ...userWithoutPassword,
@@ -86,12 +115,7 @@ router.post('/login', loginValidation, async (req, res) => {
         email_verified: user.email_verified === true || user.email_verified === 1
       },
       token,
-      workspace: workspaceContext ? {
-        id: workspaceContext.workspace_id,
-        name: workspaceContext.workspace_name,
-        slug: workspaceContext.workspace_slug,
-        role: workspaceContext.workspace_role
-      } : null
+      workspace: workspacePayload,
     };
 
     res.json({
@@ -145,13 +169,17 @@ router.get('/profile', authenticateToken, async (req, res) => {
     // Include permissions in response
     userData.permissions = req.user.permissions || [];
     
-    // Include workspace context
+    // Include workspace context (with trial/subscription status for UI)
     if (req.user.workspace) {
+      const access = isWorkspaceAccessAllowed(req.user.workspace);
       userData.workspace = {
         id: req.user.workspace.id,
         name: req.user.workspace.name,
         slug: req.user.workspace.slug,
-        role: req.user.workspace.workspace_role || req.user.workspace.role
+        role: req.user.workspace.workspace_role || req.user.workspace.role,
+        trial_ends_at: req.user.workspace.trial_ends_at || null,
+        subscription_id: req.user.workspace.subscription_id || null,
+        trial_active: access.allowed,
       };
     }
     
@@ -457,10 +485,10 @@ router.post('/register', registerValidation, async (req, res) => {
 
         const userId = userResult.insertId;
 
-        // 2. Create workspace
+        // 2. Create workspace (30-day trial from creation)
         const [workspaceResult] = await connection.execute(
-          `INSERT INTO workspaces (name, slug, owner_id, plan_type, status)
-           VALUES (?, ?, ?, 'free', 'active')`,
+          `INSERT INTO workspaces (name, slug, owner_id, plan_type, status, trial_ends_at)
+           VALUES (?, ?, ?, 'free', 'active', DATE_ADD(NOW(), INTERVAL 30 DAY))`,
           [workspace_name.trim(), workspaceSlug, userId]
         );
 

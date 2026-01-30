@@ -1,5 +1,6 @@
 const jwt = require('jsonwebtoken');
 const { query } = require('../config/database');
+const { isWorkspaceAccessAllowed } = require('../utils/workspaceUtils');
 
 async function getUserByIdSafe(userId) {
   // Get user with all multi-tenant fields
@@ -108,9 +109,9 @@ const authenticateToken = async (req, res, next) => {
     // Get workspace context for multi-tenant support
     let workspaceContext = null;
     if (!user.is_super_admin && user.workspace_id) {
-      // Get workspace info
+      // Get workspace info (include trial/subscription for access check)
       const workspaces = await query(
-        `SELECT id, name, slug, owner_id, plan_type, status 
+        `SELECT id, name, slug, owner_id, plan_type, status, trial_ends_at, subscription_id 
          FROM workspaces 
          WHERE id = ? AND status = 'active'`,
         [user.workspace_id]
@@ -121,7 +122,7 @@ const authenticateToken = async (req, res, next) => {
     } else if (!user.is_super_admin) {
       // User doesn't have workspace_id, try to get from workspace_members
       const memberships = await query(
-        `SELECT w.id, w.name, w.slug, w.owner_id, w.plan_type, w.status, wm.role as workspace_role
+        `SELECT w.id, w.name, w.slug, w.owner_id, w.plan_type, w.status, w.trial_ends_at, w.subscription_id, wm.role as workspace_role
          FROM workspace_members wm
          INNER JOIN workspaces w ON wm.workspace_id = w.id
          WHERE wm.user_id = ? AND wm.status = 'active' AND w.status = 'active'
@@ -132,6 +133,19 @@ const authenticateToken = async (req, res, next) => {
       if (memberships.length > 0) {
         workspaceContext = memberships[0];
         user.workspace_id = workspaceContext.id;
+      }
+    }
+
+    // Enforce trial/subscription: block if trial expired and no subscription
+    if (!user.is_super_admin && workspaceContext) {
+      const access = isWorkspaceAccessAllowed(workspaceContext);
+      if (!access.allowed && access.reason === 'trial_expired') {
+        return res.status(403).json({
+          success: false,
+          message: 'Your free trial has ended. Please upgrade or contact sales to continue.',
+          code: 'TRIAL_EXPIRED',
+          trial_ends_at: access.trial_ends_at,
+        });
       }
     }
 

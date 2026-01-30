@@ -87,7 +87,9 @@ router.get('/', authorizePermission('users', 'view'), [
       whereParams.push(isActive === 'true' || isActive === true);
     }
 
-    // Get users with related data
+    const isSuperAdmin = req.isSuperAdmin === true;
+
+    // Get users with related data (super admin also gets workspace name)
     const users = await dbQuery(
       `SELECT 
         u.id,
@@ -104,8 +106,10 @@ router.get('/', authorizePermission('users', 'view'), [
         c.full_name as client_name,
         c.company_name as client_company,
         (SELECT COUNT(*) FROM user_projects WHERE user_id = u.id) as project_count
+        ${isSuperAdmin ? ', w.name as workspace_name' : ''}
        FROM users u
        LEFT JOIN clients c ON u.client_id = c.id
+       ${isSuperAdmin ? 'LEFT JOIN workspaces w ON u.workspace_id = w.id' : ''}
        ${whereClause}
        ORDER BY u.created_at DESC
        LIMIT ? OFFSET ?`,

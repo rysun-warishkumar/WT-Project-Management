@@ -50,6 +50,23 @@ const generateUniqueSlug = async (workspaceName) => {
 };
 
 /**
+ * Check if workspace access is allowed (within trial or has active subscription)
+ * @param {Object} workspace - Workspace row with trial_ends_at, subscription_id
+ * @returns {{ allowed: boolean, reason?: string }} - allowed and optional reason when blocked
+ */
+const isWorkspaceAccessAllowed = (workspace) => {
+  if (!workspace) return { allowed: false, reason: 'no_workspace' };
+  // Paid: has subscription_id
+  if (workspace.subscription_id) return { allowed: true };
+  // No trial set (e.g. legacy workspace): allow for backward compatibility
+  if (!workspace.trial_ends_at) return { allowed: true };
+  const now = new Date();
+  const trialEnd = new Date(workspace.trial_ends_at);
+  if (trialEnd > now) return { allowed: true };
+  return { allowed: false, reason: 'trial_expired', trial_ends_at: workspace.trial_ends_at };
+};
+
+/**
  * Get user's workspace context
  * @param {number} userId - User ID
  * @returns {Promise<Object|null>} - Workspace context or null
@@ -67,7 +84,10 @@ const getUserWorkspaceContext = async (userId) => {
         w.slug as workspace_slug,
         w.owner_id,
         w.plan_type,
-        w.status as workspace_status
+        w.status as workspace_status,
+        w.trial_ends_at,
+        w.subscription_id,
+        w.created_at as workspace_created_at
       FROM workspace_members wm
       INNER JOIN workspaces w ON wm.workspace_id = w.id
       WHERE wm.user_id = ? AND wm.status = 'active' AND w.status = 'active'
@@ -143,4 +163,5 @@ module.exports = {
   generateUniqueSlug,
   getUserWorkspaceContext,
   getUserWorkspaces,
+  isWorkspaceAccessAllowed,
 };

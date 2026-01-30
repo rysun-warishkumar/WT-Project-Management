@@ -28,7 +28,15 @@ import { settingsAPI } from '../../services/api';
 const Settings = () => {
   const { user, updateProfile, changePassword } = useAuth();
   const queryClient = useQueryClient();
+  const isSuperAdmin = Boolean(user?.is_super_admin || user?.isSuperAdmin);
   const [activeTab, setActiveTab] = useState('profile');
+
+  // If non-super-admin lands on SMTP tab (e.g. from state), switch to profile
+  useEffect(() => {
+    if (!isSuperAdmin && activeTab === 'smtp') {
+      setActiveTab('profile');
+    }
+  }, [isSuperAdmin, activeTab]);
   const [showCurrentPassword, setShowCurrentPassword] = useState(false);
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
@@ -101,7 +109,7 @@ const Settings = () => {
     }
   );
 
-  // Fetch SMTP settings
+  // Fetch SMTP settings (super admin only – API also restricts)
   const { data: smtpData, isLoading: isLoadingSmtp, refetch: refetchSmtp } = useQuery(
     'smtpSettings',
     async () => {
@@ -109,6 +117,7 @@ const Settings = () => {
       return response.data.data.smtp;
     },
     {
+      enabled: isSuperAdmin,
       onSuccess: (data) => {
         resetSmtp({
           host: data.host || '',
@@ -445,17 +454,19 @@ const Settings = () => {
             <Info className="inline-block h-4 w-4 mr-2 flex-shrink-0" />
             Account Information
           </button>
-          <button
-            onClick={() => setActiveTab('smtp')}
-            className={`inline-flex items-center px-3 py-2 text-xs sm:text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
-              activeTab === 'smtp'
-                ? 'border-primary-600 text-primary-600'
-                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-            }`}
-          >
-            <Mail className="inline-block h-4 w-4 mr-2 flex-shrink-0" />
-            SMTP Configuration
-          </button>
+          {isSuperAdmin && (
+            <button
+              onClick={() => setActiveTab('smtp')}
+              className={`inline-flex items-center px-3 py-2 text-xs sm:text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
+                activeTab === 'smtp'
+                  ? 'border-primary-600 text-primary-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              <Mail className="inline-block h-4 w-4 mr-2 flex-shrink-0" />
+              SMTP Configuration
+            </button>
+          )}
         </nav>
       </div>
 
@@ -912,6 +923,43 @@ const Settings = () => {
               </div>
             </div>
 
+            {/* Trial period – only for users on 30-day trial (no subscription_id) */}
+            {profileData?.workspace?.trial_ends_at && !profileData?.workspace?.subscription_id && (
+              <div className="mt-6 p-4 bg-amber-50 border border-amber-200 rounded-lg">
+                <div className="flex items-start">
+                  <Calendar className="h-5 w-5 text-amber-600 mt-0.5 mr-3 flex-shrink-0" />
+                  <div>
+                    <h4 className="text-sm font-medium text-amber-900 mb-2">Trial period</h4>
+                    <p className="text-sm text-amber-800 mb-1">
+                      Your free trial ends on{' '}
+                      <strong>
+                        {new Date(profileData.workspace.trial_ends_at).toLocaleDateString(undefined, {
+                          dateStyle: 'long',
+                        })}
+                      </strong>
+                      {(() => {
+                        const end = new Date(profileData.workspace.trial_ends_at);
+                        const now = new Date();
+                        const days = Math.ceil((end - now) / (1000 * 60 * 60 * 24));
+                        if (days > 0) {
+                          return (
+                            <span className="block mt-1">
+                              ({days} day{days !== 1 ? 's' : ''} remaining)
+                            </span>
+                          );
+                        }
+                        if (days === 0) return <span className="block mt-1">(Ends today)</span>;
+                        return <span className="block mt-1">(Trial ended)</span>;
+                      })()}
+                    </p>
+                    <p className="text-sm text-amber-700 mt-1">
+                      Contact sales to upgrade and continue using the platform.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Security Note */}
             <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
               <div className="flex items-start">
@@ -929,17 +977,27 @@ const Settings = () => {
         </div>
       )}
 
-      {/* SMTP Configuration Tab */}
+      {/* SMTP Configuration Tab (super admin only) */}
       {activeTab === 'smtp' && (
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 sm:p-6">
-          <div className="mb-6">
-            <h2 className="text-xl font-semibold text-gray-900">SMTP Configuration</h2>
-            <p className="text-sm text-gray-600 mt-1">
-              Configure SMTP settings for sending emails (verification, credentials, notifications)
-            </p>
-          </div>
+          {!isSuperAdmin ? (
+            <div className="rounded-lg border border-red-200 bg-red-50 p-6 text-center">
+              <Shield className="mx-auto h-10 w-10 text-red-500 mb-3" />
+              <h2 className="text-lg font-semibold text-red-800">Super admin access required</h2>
+              <p className="text-sm text-red-700 mt-1">
+                SMTP configuration can only be viewed and edited by a super administrator.
+              </p>
+            </div>
+          ) : (
+            <>
+              <div className="mb-6">
+                <h2 className="text-xl font-semibold text-gray-900">SMTP Configuration</h2>
+                <p className="text-sm text-gray-600 mt-1">
+                  Configure SMTP settings for sending emails (verification, credentials, notifications)
+                </p>
+              </div>
 
-          {isLoadingSmtp ? (
+              {isLoadingSmtp ? (
             <div className="flex items-center justify-center py-12">
               <Loader className="h-8 w-8 animate-spin text-primary-600" />
             </div>
@@ -1220,6 +1278,8 @@ const Settings = () => {
               </form>
             </>
           )}
+          </>
+        )}
         </div>
       )}
     </div>

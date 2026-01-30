@@ -21,9 +21,12 @@ import { usersAPI, clientsAPI } from '../../services/api';
 import toast from 'react-hot-toast';
 import UserModal from './UserModal';
 import DeleteConfirmModal from '../../components/Common/DeleteConfirmModal';
+import { useAuth } from '../../contexts/AuthContext';
 
 const Users = () => {
   const queryClient = useQueryClient();
+  const { user: currentUser } = useAuth();
+  const isSuperAdmin = currentUser?.is_super_admin === true || currentUser?.isSuperAdmin === true;
   const [searchTerm, setSearchTerm] = useState('');
   const [roleFilter, setRoleFilter] = useState('');
   const [clientFilter, setClientFilter] = useState('');
@@ -318,6 +321,11 @@ const Users = () => {
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Role
                     </th>
+                    {isSuperAdmin && (
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Workspace
+                      </th>
+                    )}
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Client
                     </th>
@@ -362,6 +370,11 @@ const Users = () => {
                           {getRoleDisplayName(user.role)}
                         </span>
                       </td>
+                      {isSuperAdmin && (
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                          {user.workspace_name || '—'}
+                        </td>
+                      )}
                       <td className="px-6 py-4 whitespace-nowrap">
                         {user.client_name ? (
                           <div>

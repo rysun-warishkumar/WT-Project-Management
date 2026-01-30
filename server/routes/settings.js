@@ -5,10 +5,23 @@ const { authenticateToken, authorizePermission } = require('../middleware/auth')
 
 const router = express.Router();
 
+const superAdminOnly = (req, res, next) => {
+  if (!req.user) {
+    return res.status(401).json({ success: false, message: 'Authentication required' });
+  }
+  if (!req.isSuperAdmin && !req.user.is_super_admin && !req.user.isSuperAdmin) {
+    return res.status(403).json({
+      success: false,
+      message: 'Super admin access required',
+    });
+  }
+  next();
+};
+
 // Apply authentication to all routes
 router.use(authenticateToken);
 
-// Get system settings
+// Get system settings (SMTP data only returned for super admin)
 router.get('/', authorizePermission('settings', 'view'), async (req, res) => {
   try {
     // Ensure system_settings table exists
@@ -45,7 +58,7 @@ router.get('/', authorizePermission('settings', 'view'), async (req, res) => {
     });
 
     // Merge with environment variables (env takes precedence if not in DB)
-    const smtpConfig = {
+    let smtpConfig = {
       host: smtpSettings.host || process.env.SMTP_HOST || '',
       port: smtpSettings.port || process.env.SMTP_PORT || '587',
       secure: smtpSettings.secure === 'true' || process.env.SMTP_SECURE === 'true' || false,
@@ -54,6 +67,20 @@ router.get('/', authorizePermission('settings', 'view'), async (req, res) => {
       from: smtpSettings.from || process.env.SMTP_FROM || process.env.SMTP_USER || '',
       enabled: smtpSettings.enabled === 'true' || (process.env.SMTP_HOST ? true : false)
     };
+
+    // Only super admin sees real SMTP config; others get empty/masked
+    const isSuperAdmin = req.isSuperAdmin || req.user.is_super_admin || req.user.isSuperAdmin;
+    if (!isSuperAdmin) {
+      smtpConfig = {
+        enabled: false,
+        host: '',
+        port: '587',
+        secure: false,
+        user: '',
+        pass: '',
+        from: ''
+      };
+    }
 
     res.json({
       success: true,
@@ -66,15 +93,18 @@ router.get('/', authorizePermission('settings', 'view'), async (req, res) => {
     
     // If system_settings table doesn't exist, return env-based config
     if (error.code === 'ER_NO_SUCH_TABLE') {
-      const smtpConfig = {
-        host: process.env.SMTP_HOST || '',
-        port: process.env.SMTP_PORT || '587',
-        secure: process.env.SMTP_SECURE === 'true' || false,
-        user: process.env.SMTP_USER || '',
-        pass: process.env.SMTP_PASS ? '***' : '',
-        from: process.env.SMTP_FROM || process.env.SMTP_USER || '',
-        enabled: !!process.env.SMTP_HOST
-      };
+      const isSuperAdmin = req.isSuperAdmin || req.user.is_super_admin || req.user.isSuperAdmin;
+      const smtpConfig = isSuperAdmin
+        ? {
+            host: process.env.SMTP_HOST || '',
+            port: process.env.SMTP_PORT || '587',
+            secure: process.env.SMTP_SECURE === 'true' || false,
+            user: process.env.SMTP_USER || '',
+            pass: process.env.SMTP_PASS ? '***' : '',
+            from: process.env.SMTP_FROM || process.env.SMTP_USER || '',
+            enabled: !!process.env.SMTP_HOST
+          }
+        : { enabled: false, host: '', port: '587', secure: false, user: '', pass: '', from: '' };
 
       return res.json({
         success: true,
@@ -197,8 +227,8 @@ router.put('/smtp', authorizePermission('settings', 'edit'), [
   }
 });
 
-// Test SMTP connection
-router.post('/smtp/test', authorizePermission('settings', 'edit'), [
+// Test SMTP connection (super admin only)
+router.post('/smtp/test', superAdminOnly, [
   body('host').notEmpty().withMessage('Host is required'),
   body('port').notEmpty().isInt({ min: 1, max: 65535 }).withMessage('Valid port is required'),
   // Accept either a real email (most providers) or "apikey" (SendGrid)

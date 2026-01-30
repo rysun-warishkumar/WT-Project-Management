@@ -29,6 +29,15 @@ const Login = () => {
     }
   }, [location.search]);
 
+  // Show trial-expired message when redirected after session expiry
+  const [showTrialExpiredBanner, setShowTrialExpiredBanner] = useState(false);
+  useEffect(() => {
+    if (sessionStorage.getItem('trial_expired') === '1') {
+      sessionStorage.removeItem('trial_expired');
+      setShowTrialExpiredBanner(true);
+    }
+  }, []);
+
   const onSubmit = async (data) => {
     setIsLoading(true);
     
@@ -42,6 +51,10 @@ const Login = () => {
         if (result.requiresVerification) {
           toast.error(result.error || 'Please verify your email address before logging in.', {
             duration: 6000,
+          });
+        } else if (result.trialExpired) {
+          toast.error(result.error || 'Your free trial has ended. Please contact sales to upgrade.', {
+            duration: 8000,
           });
         } else {
           toast.error(result.error || 'Login failed');
@@ -83,6 +96,13 @@ const Login = () => {
             Sign in to your account to continue
           </p>
         </div>
+
+        {/* Trial expired banner (after session check) */}
+        {showTrialExpiredBanner && (
+          <div className="rounded-lg bg-amber-50 border border-amber-200 py-4 px-4 text-center text-amber-800 text-sm">
+            Your free trial has ended. Please contact sales to upgrade and continue using the platform.
+          </div>
+        )}
 
         {/* Login Form */}
         <div className="bg-white py-8 px-6 shadow-soft rounded-lg">

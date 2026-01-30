@@ -21,6 +21,8 @@ import {
   UserCog,
   ChevronLeft,
   ChevronRight,
+  CreditCard,
+  Mail,
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { usePermissions } from '../../hooks/usePermissions';
@@ -45,9 +47,11 @@ const Layout = () => {
     localStorage.setItem('cms-sidebar-collapsed', JSON.stringify(isCollapsed));
   }, [isCollapsed]);
 
-  // Define all navigation items
+  // Define all navigation items (subscriptions shown only for super admin in filter below)
   const allNavigationItems = [
     { name: 'Dashboard', href: '/dashboard', icon: Home, key: 'dashboard' },
+    { name: 'Subscriptions', href: '/subscriptions', icon: CreditCard, key: 'subscriptions' },
+    { name: 'Inquiries', href: '/inquiries', icon: Mail, key: 'inquiries' },
     { name: 'Clients', href: '/clients', icon: Users, key: 'clients' },
     { name: 'Projects', href: '/projects', icon: FolderOpen, key: 'projects' },
     { name: 'Quotations', href: '/quotations', icon: FileText, key: 'quotations' },
@@ -62,8 +66,11 @@ const Layout = () => {
     { name: 'Settings', href: '/settings', icon: Settings, key: 'settings' },
   ];
 
-  // Filter navigation based on permissions
+  // Filter navigation based on permissions (subscriptions: super admin only)
   const navigation = allNavigationItems.filter(item => {
+    if (item.key === 'subscriptions' || item.key === 'inquiries') {
+      return Boolean(user?.is_super_admin || user?.isSuperAdmin);
+    }
     const permission = NAVIGATION_PERMISSIONS[item.key];
     
     // If no permission required, always show

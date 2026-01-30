@@ -8,6 +8,7 @@ const initialState = {
   token: localStorage.getItem('token'),
   isAuthenticated: false,
   loading: true,
+  trialExpired: false,
 };
 
 const authReducer = (state, action) => {
@@ -39,6 +40,13 @@ const authReducer = (state, action) => {
         user: null,
         token: null,
         isAuthenticated: false,
+        loading: false,
+        trialExpired: false,
+      };
+    case 'TRIAL_EXPIRED':
+      return {
+        ...state,
+        trialExpired: true,
         loading: false,
       };
     case 'UPDATE_USER':
@@ -78,6 +86,11 @@ export const AuthProvider = ({ children }) => {
           });
         } catch (error) {
           console.error('Auth check failed:', error);
+          const code = error.response?.data?.code;
+          const isTrialExpired = error.response?.status === 403 && code === 'TRIAL_EXPIRED';
+          if (isTrialExpired) {
+            sessionStorage.setItem('trial_expired', '1');
+          }
           localStorage.removeItem('token');
           dispatch({ type: 'LOGIN_FAILURE' });
         }
@@ -127,10 +140,12 @@ export const AuthProvider = ({ children }) => {
       return { success: true };
     } catch (error) {
       dispatch({ type: 'LOGIN_FAILURE' });
+      const code = error.response?.data?.code;
       return {
         success: false,
         error: error.response?.data?.message || 'Login failed',
         requiresVerification: error.response?.data?.requiresVerification || false,
+        trialExpired: error.response?.status === 403 && code === 'TRIAL_EXPIRED',
       };
     }
   };
