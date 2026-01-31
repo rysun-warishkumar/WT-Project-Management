@@ -50,11 +50,14 @@ const Register = () => {
           toast.error(err.msg || err.message || 'Validation error');
         });
       } else {
-        toast.error(
-          error.response?.data?.message || 
-          'Registration failed. Please try again.' ||
-          'An unexpected error occurred'
-        );
+        const msg = error.response?.data?.message;
+        const isTimeout = error.code === 'ECONNABORTED' || error.message?.includes('timeout');
+        const isEmailFailure = msg?.toLowerCase().includes('email verification') || error.response?.status === 503;
+        if (isTimeout || isEmailFailure) {
+          toast.error(msg || 'Failed to send email verification. Please try again later.');
+        } else {
+          toast.error(msg || 'Registration failed. Please try again.' || 'An unexpected error occurred');
+        }
       }
     } finally {
       setIsLoading(false);

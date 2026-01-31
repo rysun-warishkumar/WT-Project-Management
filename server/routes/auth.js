@@ -592,7 +592,7 @@ router.post('/register', registerValidation, async (req, res) => {
       }
     }
 
-    // Send verification email
+    // Send verification email – registration only completes when email is sent
     let emailSent = false;
     try {
       console.log('Sending verification email. Token (first 30 chars):', result.verificationToken.substring(0, 30));
@@ -608,7 +608,22 @@ router.post('/register', registerValidation, async (req, res) => {
       }
     } catch (emailError) {
       console.error('Error sending verification email:', emailError);
-      // Don't fail registration if email fails
+    }
+
+    if (!emailSent) {
+      // Rollback: remove user and workspace so we don't leave unverified accounts
+      try {
+        await query('DELETE FROM workspace_members WHERE workspace_id = ?', [result.workspaceId]);
+        await query('DELETE FROM workspaces WHERE id = ?', [result.workspaceId]);
+        await query('UPDATE users SET workspace_id = NULL WHERE id = ?', [result.userId]);
+        await query('DELETE FROM users WHERE id = ?', [result.userId]);
+      } catch (rollbackErr) {
+        console.error('Rollback after email failure:', rollbackErr);
+      }
+      return res.status(503).json({
+        success: false,
+        message: 'Failed to send email verification. Please try again later.',
+      });
     }
 
     res.status(201).json({
