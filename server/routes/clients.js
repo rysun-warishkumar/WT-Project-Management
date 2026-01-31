@@ -340,18 +340,54 @@ router.post('/', authorizePermission('clients', 'create'), clientValidation, asy
       ]
     );
 
-    // Get the created client (by insertId; fallback by workspace+email when insertId is 0 - hotfix for broken AUTO_INCREMENT on some hosts)
+    // Resolve client id; when insertId is 0 (broken AUTO_INCREMENT on live), assign next id in DB and bump AUTO_INCREMENT
+    let clientId = result.insertId != null ? Number(result.insertId) : 0;
     let newClient;
-    const insertId = result.insertId != null ? Number(result.insertId) : 0;
-    if (insertId > 0) {
-      newClient = await dbQuery('SELECT * FROM clients WHERE id = ?', [insertId]);
+
+    if (clientId > 0) {
+      newClient = await dbQuery('SELECT * FROM clients WHERE id = ?', [clientId]);
+    } else {
+      // Assign next id in DB so new client gets a real id (same fix as projects)
+      const maxRetries = 5;
+      let assigned = false;
+      for (let attempt = 0; attempt < maxRetries && !assigned; attempt++) {
+        const nextRows = await dbQuery(
+          'SELECT COALESCE(MAX(id), 0) + 1 AS next_id FROM clients WHERE id > 0'
+        );
+        const nextId = nextRows && nextRows[0] ? Number(nextRows[0].next_id) : 1;
+        try {
+          const updateResult = await dbQuery(
+            'UPDATE clients SET id = ? WHERE id = 0 AND (workspace_id <=> ?) AND email = ? LIMIT 1',
+            [nextId, workspaceId || null, email]
+          );
+          const affected = updateResult && typeof updateResult.affectedRows === 'number' ? updateResult.affectedRows : 0;
+          if (affected >= 1) {
+            clientId = nextId;
+            assigned = true;
+            try {
+              await dbQuery(
+                `ALTER TABLE clients AUTO_INCREMENT = ${Number(nextId) + 1}`
+              );
+            } catch (alterErr) {
+              console.warn('Could not bump clients AUTO_INCREMENT:', alterErr.message);
+            }
+            break;
+          }
+        } catch (err) {
+          if (err.code === 'ER_DUP_ENTRY') continue;
+          throw err;
+        }
+      }
+      if (assigned) {
+        newClient = await dbQuery('SELECT * FROM clients WHERE id = ?', [clientId]);
+      } else {
+        newClient = await dbQuery(
+          'SELECT * FROM clients WHERE workspace_id <=> ? AND email = ? ORDER BY id DESC LIMIT 1',
+          [workspaceId || null, email]
+        );
+      }
     }
-    if (!newClient || newClient.length === 0) {
-      newClient = await dbQuery(
-        'SELECT * FROM clients WHERE workspace_id <=> ? AND email = ? ORDER BY id DESC LIMIT 1',
-        [workspaceId || null, email]
-      );
-    }
+
     if (!newClient || newClient.length === 0) {
       return res.status(500).json({
         success: false,
