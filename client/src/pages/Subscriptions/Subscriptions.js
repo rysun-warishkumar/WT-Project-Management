@@ -91,6 +91,11 @@ export default function Subscriptions() {
     setTrialEndsAt('');
   };
 
+  const handleDeleteWorkspace = (sub) => {
+    if (!window.confirm(`Delete workspace "${sub.name}"? This will hide it from the list; data is kept.`)) return;
+    deleteWorkspaceMutation.mutate(sub.id);
+  };
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
