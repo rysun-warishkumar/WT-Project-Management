@@ -265,10 +265,10 @@ router.post('/', authorizePermission('conversations', 'create'), validateConvers
       return res.status(403).json({ success: false, message: 'Workspace context required' });
     }
 
-    // Check if client exists
+    // Check if client exists and is not soft-deleted
     const wsCli = getWorkspaceFilter(req, '', 'workspace_id');
     const clientCheck = await dbQuery(
-      `SELECT id FROM clients WHERE id = ? ${wsCli.whereClause}`,
+      `SELECT id FROM clients WHERE id = ? AND deleted_at IS NULL ${wsCli.whereClause}`,
       [client_id, ...wsCli.whereParams]
     );
     if (clientCheck.length === 0) {
@@ -278,11 +278,11 @@ router.post('/', authorizePermission('conversations', 'create'), validateConvers
       });
     }
 
-    // Check if project exists (if provided)
+    // Check if project exists and is not soft-deleted (if provided)
     if (project_id) {
       const wsProj = getWorkspaceFilter(req, '', 'workspace_id');
       const projectCheck = await dbQuery(
-        `SELECT id FROM projects WHERE id = ? ${wsProj.whereClause}`,
+        `SELECT id FROM projects WHERE id = ? AND deleted_at IS NULL ${wsProj.whereClause}`,
         [project_id, ...wsProj.whereParams]
       );
       if (projectCheck.length === 0) {

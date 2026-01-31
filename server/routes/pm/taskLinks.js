@@ -2,6 +2,7 @@ const express = require('express');
 const { body, validationResult } = require('express-validator');
 const { authenticateToken, authorizePermission } = require('../../middleware/auth');
 const { query: dbQuery } = require('../../config/database');
+const { checkProjectAvailable } = require('../../utils/pmProjectCheck');
 
 const router = express.Router();
 
@@ -177,6 +178,14 @@ router.post('/', authorizePermission('projects', 'edit'), [
       });
     }
 
+    const projectCheck = await checkProjectAvailable(sourceTask.workspace_id);
+    if (projectCheck) {
+      return res.status(projectCheck.status).json({
+        success: false,
+        message: projectCheck.message
+      });
+    }
+
     // Check if link already exists
     const [existingLink] = await dbQuery(
       'SELECT * FROM pm_task_links WHERE source_task_id = ? AND target_task_id = ? AND link_type = ?',
@@ -327,6 +336,14 @@ router.delete('/:id', authorizePermission('projects', 'edit'), async (req, res) 
       return res.status(403).json({
         success: false,
         message: 'Access denied. You do not have access to this workspace.'
+      });
+    }
+
+    const projectCheck = await checkProjectAvailable(link.workspace_id);
+    if (projectCheck) {
+      return res.status(projectCheck.status).json({
+        success: false,
+        message: projectCheck.message
       });
     }
 

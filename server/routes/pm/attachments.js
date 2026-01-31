@@ -5,6 +5,7 @@ const fs = require('fs').promises;
 const { authenticateToken, authorizePermission } = require('../../middleware/auth');
 const { body, validationResult } = require('express-validator');
 const { query: dbQuery } = require('../../config/database');
+const { checkProjectAvailable } = require('../../utils/pmProjectCheck');
 
 const router = express.Router();
 
@@ -374,6 +375,14 @@ router.get('/download/:id', authorizePermission('projects', 'view'), async (req,
       return res.status(403).json({
         success: false,
         message: 'Access denied. You do not have access to this workspace.'
+      });
+    }
+
+    const projectCheck = await checkProjectAvailable(attachment.workspace_id);
+    if (projectCheck) {
+      return res.status(projectCheck.status).json({
+        success: false,
+        message: projectCheck.message
       });
     }
 

@@ -36,3 +36,5 @@ MULTI_TENANT_ARCHITECTURE.md
 database/IMPORT_INSTRUCTIONS.md
 database/FIX_FOREIGN_KEY_ERROR.md
 marketing-website
+hotfix_clients_id_zero.sql
+hotfix_projects_id_zero.sql

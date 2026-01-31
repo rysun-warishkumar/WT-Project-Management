@@ -13,16 +13,16 @@ const router = express.Router();
 router.use(authenticateToken);
 router.use(workspaceContext);
 
-// Validation for client creation/update
+// Validation for client creation/update – clear messages for API responses
 const clientValidation = [
-  body('full_name').notEmpty().withMessage('Full name is required'),
-  body('email').isEmail().withMessage('Valid email is required'),
-  body('phone').optional().isMobilePhone().withMessage('Valid phone number is required'),
-  body('whatsapp').optional().isMobilePhone().withMessage('Valid WhatsApp number is required'),
-  body('company_name').optional().isLength({ max: 100 }).withMessage('Company name too long'),
-  body('business_type').optional().isLength({ max: 50 }).withMessage('Business type too long'),
-  body('gst_number').optional().isLength({ max: 20 }).withMessage('GST number too long'),
-  body('tax_id').optional().isLength({ max: 50 }).withMessage('Tax ID too long')
+  body('full_name').trim().notEmpty().withMessage('Full name is required').isLength({ max: 255 }).withMessage('Full name must be 255 characters or less'),
+  body('email').trim().notEmpty().withMessage('Email is required').isEmail().withMessage('Please enter a valid email address'),
+  body('phone').optional({ checkFalsy: true }).trim().isLength({ max: 30 }).withMessage('Phone number must be 30 characters or less'),
+  body('whatsapp').optional({ checkFalsy: true }).trim().isLength({ max: 30 }).withMessage('WhatsApp number must be 30 characters or less'),
+  body('company_name').optional({ checkFalsy: true }).trim().isLength({ max: 255 }).withMessage('Company name must be 255 characters or less'),
+  body('business_type').optional({ checkFalsy: true }).trim().isLength({ max: 100 }).withMessage('Business type must be 100 characters or less'),
+  body('gst_number').optional({ checkFalsy: true }).trim().isLength({ max: 50 }).withMessage('GST number must be 50 characters or less'),
+  body('tax_id').optional({ checkFalsy: true }).trim().isLength({ max: 50 }).withMessage('Tax ID must be 50 characters or less')
 ];
 
 // Get all clients with pagination and search
@@ -41,10 +41,11 @@ router.get('/', authorizePermission('clients', 'view'), [
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
+      const errList = errors.array().map((e) => ({ field: e.path, message: e.msg }));
       return res.status(400).json({
         success: false,
-        message: 'Validation error',
-        errors: errors.array()
+        message: errList[0]?.message || 'Invalid filter or pagination',
+        errors: errList
       });
     }
 
@@ -72,6 +73,9 @@ router.get('/', authorizePermission('clients', 'view'), [
     const countClientFilter = getClientFilter(req, '', 'id');
     countWhereClause += countClientFilter.whereClause;
     countWhereParams.push(...countClientFilter.whereParams);
+
+    countWhereClause += ' AND (deleted_at IS NULL)';
+    selectWhereClause += ' AND (c.deleted_at IS NULL)';
 
     // For SELECT query - with alias
     const selectWorkspaceFilter = getWorkspaceFilter(req, 'c', 'workspace_id');
@@ -126,6 +130,7 @@ router.get('/', authorizePermission('clients', 'view'), [
             COUNT(CASE WHEN status = 'completed' THEN 1 END) as completed_projects,
             COUNT(CASE WHEN status = 'in_progress' THEN 1 END) as active_projects
           FROM projects
+          WHERE deleted_at IS NULL
           GROUP BY client_id
         ) pc ON c.id = pc.client_id
         ${selectWhereClause}
@@ -262,10 +267,12 @@ router.post('/', authorizePermission('clients', 'create'), clientValidation, asy
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
+      const errList = errors.array().map((e) => ({ field: e.path, message: e.msg }));
+      const firstMsg = errList[0]?.message || 'Please fix the errors below';
       return res.status(400).json({
         success: false,
-        message: 'Validation error',
-        errors: errors.array()
+        message: firstMsg,
+        errors: errList
       });
     }
 
@@ -314,7 +321,7 @@ router.post('/', authorizePermission('clients', 'create'), clientValidation, asy
     if (existingClients.length > 0) {
       return res.status(400).json({
         success: false,
-        message: 'Client with this email already exists'
+        message: 'A client with this email address already exists. Please use a different email.'
       });
     }
 
@@ -333,11 +340,24 @@ router.post('/', authorizePermission('clients', 'create'), clientValidation, asy
       ]
     );
 
-    // Get the created client
-    const newClient = await dbQuery(
-      'SELECT * FROM clients WHERE id = ?',
-      [result.insertId]
-    );
+    // Get the created client (by insertId; fallback by workspace+email when insertId is 0 - hotfix for broken AUTO_INCREMENT on some hosts)
+    let newClient;
+    const insertId = result.insertId != null ? Number(result.insertId) : 0;
+    if (insertId > 0) {
+      newClient = await dbQuery('SELECT * FROM clients WHERE id = ?', [insertId]);
+    }
+    if (!newClient || newClient.length === 0) {
+      newClient = await dbQuery(
+        'SELECT * FROM clients WHERE workspace_id <=> ? AND email = ? ORDER BY id DESC LIMIT 1',
+        [workspaceId || null, email]
+      );
+    }
+    if (!newClient || newClient.length === 0) {
+      return res.status(500).json({
+        success: false,
+        message: 'Client was created but could not be retrieved. Please refresh the list or contact support.'
+      });
+    }
 
     // Auto-create client user account
     let userCreated = false;
@@ -370,11 +390,11 @@ router.post('/', authorizePermission('clients', 'create'), clientValidation, asy
           counter++;
         }
 
-        // Create user account
+        // Create user account (use newClient[0].id so it's correct even when insertId was 0)
         await dbQuery(
           `INSERT INTO users (username, email, password, full_name, role, client_id, is_active)
            VALUES (?, ?, ?, ?, 'client', ?, 1)`,
-          [username, email, hashedPassword, full_name, result.insertId]
+          [username, email, hashedPassword, full_name, newClient[0].id]
         );
 
         userCreated = true;
@@ -408,7 +428,7 @@ router.post('/', authorizePermission('clients', 'create'), clientValidation, asy
     console.error('Create client error:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to create client'
+      message: 'Unable to create client. Please try again or contact support if the problem continues.'
     });
   }
 });
@@ -418,10 +438,12 @@ router.put('/:id', authorizePermission('clients', 'edit'), clientValidation, asy
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
+      const errList = errors.array().map((e) => ({ field: e.path, message: e.msg }));
+      const firstMsg = errList[0]?.message || 'Please fix the errors below';
       return res.status(400).json({
         success: false,
-        message: 'Validation error',
-        errors: errors.array()
+        message: firstMsg,
+        errors: errList
       });
     }
 
@@ -430,7 +452,7 @@ router.put('/:id', authorizePermission('clients', 'edit'), clientValidation, asy
     if (isNaN(clientId)) {
       return res.status(400).json({
         success: false,
-        message: 'Invalid client ID'
+        message: 'Invalid client. Please refresh and try again.'
       });
     }
 
@@ -456,7 +478,7 @@ router.put('/:id', authorizePermission('clients', 'edit'), clientValidation, asy
 
     // Check if client exists
     const existingClients = await dbQuery(
-      'SELECT id FROM clients WHERE id = ?',
+      'SELECT id FROM clients WHERE id = ? AND deleted_at IS NULL',
       [clientId]
     );
 
@@ -470,7 +492,7 @@ router.put('/:id', authorizePermission('clients', 'edit'), clientValidation, asy
     // Check if email is already taken by another client
     if (email) {
       const emailCheck = await dbQuery(
-        'SELECT id FROM clients WHERE email = ? AND id != ?',
+        'SELECT id FROM clients WHERE email = ? AND id != ? AND deleted_at IS NULL',
         [email, clientId]
       );
 
@@ -512,7 +534,7 @@ router.put('/:id', authorizePermission('clients', 'edit'), clientValidation, asy
     console.error('Update client error:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to update client'
+      message: 'Unable to update client. Please try again or contact support if the problem continues.'
     });
   }
 });
@@ -529,9 +551,9 @@ router.delete('/:id', authorizePermission('clients', 'delete'), async (req, res)
       });
     }
 
-    // Check if client has active projects
+    // Check if client has active projects (only non-deleted projects)
     const activeProjects = await dbQuery(
-      'SELECT COUNT(*) as count FROM projects WHERE client_id = ? AND status IN ("planning", "in_progress", "review")',
+      'SELECT COUNT(*) as count FROM projects WHERE client_id = ? AND deleted_at IS NULL AND status IN ("planning", "in_progress", "review")',
       [clientId]
     );
 
@@ -555,8 +577,11 @@ router.delete('/:id', authorizePermission('clients', 'delete'), async (req, res)
       });
     }
 
-    // Delete client (cascade will handle related records)
-    await dbQuery('DELETE FROM clients WHERE id = ?', [clientId]);
+    // Soft delete: keep data, hide from user
+    await dbQuery(
+      'UPDATE clients SET deleted_at = NOW() WHERE id = ? AND deleted_at IS NULL',
+      [clientId]
+    );
 
     res.json({
       success: true,
@@ -582,6 +607,7 @@ router.get('/stats/overview', async (req, res) => {
         COUNT(CASE WHEN status = 'prospect' THEN 1 END) as prospect_clients,
         COUNT(CASE WHEN onboarding_date >= DATE_SUB(NOW(), INTERVAL 30 DAY) THEN 1 END) as new_clients_30_days
       FROM clients
+      WHERE deleted_at IS NULL
     `);
 
     const businessTypeStats = await dbQuery(`
@@ -589,7 +615,7 @@ router.get('/stats/overview', async (req, res) => {
         business_type,
         COUNT(*) as count
       FROM clients 
-      WHERE business_type IS NOT NULL AND business_type != ''
+      WHERE business_type IS NOT NULL AND business_type != '' AND deleted_at IS NULL
       GROUP BY business_type
       ORDER BY count DESC
       LIMIT 10

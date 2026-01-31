@@ -2,6 +2,7 @@ const express = require('express');
 const { body, validationResult, query: validatorQuery } = require('express-validator');
 const { authenticateToken, authorizePermission } = require('../../middleware/auth');
 const { query: dbQuery } = require('../../config/database');
+const { checkProjectAvailable } = require('../../utils/pmProjectCheck');
 
 const router = express.Router();
 
@@ -351,6 +352,14 @@ router.post('/', authorizePermission('projects', 'edit'), [
       });
     }
 
+    const projectCheck = await checkProjectAvailable(task.workspace_id);
+    if (projectCheck) {
+      return res.status(projectCheck.status).json({
+        success: false,
+        message: projectCheck.message
+      });
+    }
+
     // Create time log
     const result = await dbQuery(
       `INSERT INTO pm_time_logs (task_id, user_id, hours, description, logged_date)
@@ -563,6 +572,14 @@ router.delete('/:id', authorizePermission('projects', 'edit'), async (req, res) 
       return res.status(403).json({
         success: false,
         message: 'Access denied. You can only delete your own time logs or need workspace admin access.'
+      });
+    }
+
+    const projectCheck = await checkProjectAvailable(timeLog.workspace_id);
+    if (projectCheck) {
+      return res.status(projectCheck.status).json({
+        success: false,
+        message: projectCheck.message
       });
     }
 

@@ -10,30 +10,30 @@ const { workspaceContext } = require('../middleware/workspaceContext');
 router.use(authenticateToken);
 router.use(workspaceContext);
 
-// Validation middleware
+// Validation middleware – clear messages for API responses
 const validateProject = [
-  body('title').trim().notEmpty().withMessage('Project title is required'),
-  body('client_id').isInt().withMessage('Valid client ID is required'),
-  body('type').isIn(['website', 'ecommerce', 'mobile_app', 'web_app', 'design', 'consulting', 'maintenance', 'other']).withMessage('Valid project type is required'),
-  body('status').isIn(['planning', 'in_progress', 'review', 'completed', 'on_hold', 'cancelled']).withMessage('Valid status is required'),
-  body('start_date').optional({ checkFalsy: true }).isISO8601().withMessage('Valid start date is required'),
-  body('end_date').optional({ checkFalsy: true }).isISO8601().withMessage('Valid end date is required'),
+  body('title').trim().notEmpty().withMessage('Project title is required').isLength({ max: 255 }).withMessage('Title must be 255 characters or less'),
+  body('client_id').notEmpty().withMessage('Please select a client').bail().toInt().isInt({ min: 1 }).withMessage('Valid client is required'),
+  body('type').notEmpty().withMessage('Please select a project type').bail().isIn(['website', 'ecommerce', 'mobile_app', 'web_app', 'design', 'consulting', 'maintenance', 'other']).withMessage('Please select a valid project type'),
+  body('status').notEmpty().withMessage('Please select a status').bail().isIn(['planning', 'in_progress', 'review', 'completed', 'on_hold', 'cancelled']).withMessage('Please select a valid status'),
+  body('start_date').optional({ checkFalsy: true }).isISO8601().withMessage('Start date must be a valid date (YYYY-MM-DD)'),
+  body('end_date').optional({ checkFalsy: true }).isISO8601().withMessage('End date must be a valid date (YYYY-MM-DD)'),
   body('end_date').custom((value, { req }) => {
     if (req.body.status === 'completed' && !value) {
-      throw new Error('End date is required when status is completed');
+      throw new Error('End date is required when status is Completed');
     }
     return true;
   }),
-  body('budget').optional().isFloat({ min: 0 }).withMessage('Budget must be a positive number'),
-  body('admin_url').optional().custom((value) => {
-    if (value && !/^https?:\/\/.+/.test(value)) {
-      throw new Error('Valid admin URL is required');
+  body('budget').optional({ checkFalsy: true }).isFloat({ min: 0 }).withMessage('Budget must be zero or a positive number'),
+  body('admin_url').optional({ checkFalsy: true }).custom((value) => {
+    if (value && value.trim() && !/^https?:\/\/.+/.test(value)) {
+      throw new Error('Admin URL must start with http:// or https://');
     }
     return true;
   }),
-  body('delivery_link').optional().custom((value) => {
-    if (value && !/^https?:\/\/.+/.test(value)) {
-      throw new Error('Valid delivery link is required');
+  body('delivery_link').optional({ checkFalsy: true }).custom((value) => {
+    if (value && value.trim() && !/^https?:\/\/.+/.test(value)) {
+      throw new Error('Delivery link must start with http:// or https://');
     }
     return true;
   }),
@@ -95,10 +95,11 @@ router.get('/', authorizePermission('projects', 'view'), [
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
+      const errList = errors.array().map((e) => ({ field: e.path, message: e.msg }));
       return res.status(400).json({
         success: false,
-        message: 'Validation errors',
-        errors: errors.array()
+        message: errList[0]?.message || 'Invalid filter or pagination',
+        errors: errList
       });
     }
 
@@ -190,12 +191,12 @@ router.get('/', authorizePermission('projects', 'view'), [
     // Get filters for frontend
     const filtersWorkspace = getWorkspaceFilter(req, '', 'workspace_id');
     const projectTypes = await dbQuery(
-      `SELECT DISTINCT type FROM projects WHERE type IS NOT NULL ${filtersWorkspace.whereClause} ORDER BY type`,
+      `SELECT DISTINCT type FROM projects WHERE type IS NOT NULL AND deleted_at IS NULL ${filtersWorkspace.whereClause} ORDER BY type`,
       filtersWorkspace.whereParams
     );
 
     const projectStatuses = await dbQuery(
-      `SELECT DISTINCT status FROM projects WHERE status IS NOT NULL ${filtersWorkspace.whereClause} ORDER BY status`,
+      `SELECT DISTINCT status FROM projects WHERE status IS NOT NULL AND deleted_at IS NULL ${filtersWorkspace.whereClause} ORDER BY status`,
       filtersWorkspace.whereParams
     );
 
@@ -267,7 +268,7 @@ router.get('/stats/overview', authorizePermission('projects', 'view'), async (re
         c.company_name as client_company
       FROM projects p
       LEFT JOIN clients c ON p.client_id = c.id
-      WHERE 1=1 ${getWorkspaceFilter(req, 'p', 'workspace_id').whereClause}
+      WHERE 1=1 AND (p.deleted_at IS NULL) ${getWorkspaceFilter(req, 'p', 'workspace_id').whereClause}
       ORDER BY p.created_at DESC
       LIMIT 5
     `, getWorkspaceFilter(req, 'p', 'workspace_id').whereParams);
@@ -317,7 +318,7 @@ router.get('/:id', authorizePermission('projects', 'view'), async (req, res) => 
          WHERE project_id IS NOT NULL
          GROUP BY project_id
        ) i ON p.id = i.project_id
-       WHERE p.id = ? ${ws.whereClause}`,
+       WHERE p.id = ? AND (p.deleted_at IS NULL) ${ws.whereClause}`,
       [projectId, ...ws.whereParams]
     );
 
@@ -403,10 +404,12 @@ router.post('/', authorizePermission('projects', 'create'), validateProject, asy
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
+      const errList = errors.array().map((e) => ({ field: e.path, message: e.msg }));
+      const firstMsg = errList[0]?.message || 'Please fix the errors below';
       return res.status(400).json({
         success: false,
-        message: 'Validation errors',
-        errors: errors.array()
+        message: firstMsg,
+        errors: errList
       });
     }
 
@@ -428,44 +431,67 @@ router.post('/', authorizePermission('projects', 'create'), validateProject, asy
     // Process technology stack
     const technologyStack = processTechnologyStack(tech_stack);
 
-    // Check if client exists
+    // Check if client exists and get workspace_id (used for project when super admin)
     const wsClients = getWorkspaceFilter(req, '', 'workspace_id');
     const clientCheck = await dbQuery(
-      `SELECT id FROM clients WHERE id = ? ${wsClients.whereClause}`,
+      `SELECT id, workspace_id FROM clients WHERE id = ? ${wsClients.whereClause}`,
       [client_id, ...wsClients.whereParams]
     );
     if (clientCheck.length === 0) {
       return res.status(400).json({
         success: false,
-        message: 'Client not found'
+        message: 'Selected client was not found. Please choose another client.'
+      });
+    }
+
+    // workspace_id: for super admin use client's workspace; for others use their workspace from context
+    const wsProjects = getWorkspaceFilter(req, '', 'workspace_id');
+    const workspaceId = wsProjects.whereParams?.[0] ?? clientCheck[0].workspace_id ?? null;
+    if (workspaceId == null) {
+      return res.status(400).json({
+        success: false,
+        message: 'Could not determine workspace for this project. The selected client may not belong to a workspace.'
       });
     }
 
     // Insert project
-    const wsProjects = getWorkspaceFilter(req, '', 'workspace_id');
     const result = await dbQuery(
       `INSERT INTO projects (
         title, client_id, type, status, description, technology_stack,
         start_date, end_date, budget, admin_url, delivery_link, notes, workspace_id
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
-        title, 
-        client_id, 
-        type, 
-        status, 
-        description, 
+        title,
+        client_id,
+        type,
+        status,
+        description,
         technologyStack ? JSON.stringify(technologyStack) : null,
-        start_date, 
-        end_date, 
-        budget, 
-        admin_url, 
-        delivery_link, 
+        start_date,
+        end_date,
+        budget,
+        admin_url,
+        delivery_link,
         notes,
-        wsProjects.whereParams?.[0] ?? null
+        workspaceId
       ]
     );
 
-    const projectId = result.insertId;
+    // Resolve project id (fallback when insertId is 0 - hotfix for broken AUTO_INCREMENT on some hosts)
+    let projectId = result.insertId != null ? Number(result.insertId) : 0;
+    if (projectId <= 0) {
+      const [created] = await dbQuery(
+        `SELECT id FROM projects WHERE workspace_id = ? AND title = ? AND client_id = ? ORDER BY id DESC LIMIT 1`,
+        [workspaceId, title, client_id]
+      );
+      if (created && created.id != null) projectId = Number(created.id);
+    }
+    if (!projectId || projectId <= 0) {
+      return res.status(500).json({
+        success: false,
+        message: 'Project was created but could not be retrieved. Please refresh the list or contact support.'
+      });
+    }
 
     // Auto-assign the creating user to this project so they appear in user_projects (Users list "Projects" count)
     try {
@@ -511,10 +537,12 @@ router.put('/:id', authorizePermission('projects', 'edit'), validateProject, asy
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
+      const errList = errors.array().map((e) => ({ field: e.path, message: e.msg }));
+      const firstMsg = errList[0]?.message || 'Please fix the errors below';
       return res.status(400).json({
         success: false,
-        message: 'Validation errors',
-        errors: errors.array()
+        message: firstMsg,
+        errors: errList
       });
     }
 
@@ -537,10 +565,10 @@ router.put('/:id', authorizePermission('projects', 'edit'), validateProject, asy
     // Process technology stack
     const technologyStack = processTechnologyStack(tech_stack);
 
-    // Check if project exists
+    // Check if project exists and is not soft-deleted
     const wsProj = getWorkspaceFilter(req, '', 'workspace_id');
     const projectCheck = await dbQuery(
-      `SELECT id FROM projects WHERE id = ? ${wsProj.whereClause}`,
+      `SELECT id FROM projects WHERE id = ? AND deleted_at IS NULL ${wsProj.whereClause}`,
       [projectId, ...wsProj.whereParams]
     );
     if (projectCheck.length === 0) {
@@ -597,7 +625,7 @@ router.put('/:id', authorizePermission('projects', 'edit'), validateProject, asy
         c.company_name as client_company
        FROM projects p
        LEFT JOIN clients c ON p.client_id = c.id
-       WHERE p.id = ? ${getWorkspaceFilter(req, 'p', 'workspace_id').whereClause}`,
+       WHERE p.id = ? AND (p.deleted_at IS NULL) ${getWorkspaceFilter(req, 'p', 'workspace_id').whereClause}`,
       [projectId, ...getWorkspaceFilter(req, 'p', 'workspace_id').whereParams]
     );
 
@@ -610,7 +638,7 @@ router.put('/:id', authorizePermission('projects', 'edit'), validateProject, asy
     console.error('Error updating project:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to update project'
+      message: 'Unable to update project. Please try again or contact support if the problem continues.'
     });
   }
 });
@@ -653,7 +681,7 @@ router.delete('/:id', authorizePermission('projects', 'delete'), async (req, res
 
     const wsd = getWorkspaceFilter(req, '', 'workspace_id');
     await dbQuery(
-      `DELETE FROM projects WHERE id = ? ${wsd.whereClause}`,
+      `UPDATE projects SET deleted_at = NOW() WHERE id = ? AND deleted_at IS NULL ${wsd.whereClause}`,
       [projectId, ...wsd.whereParams]
     );
 

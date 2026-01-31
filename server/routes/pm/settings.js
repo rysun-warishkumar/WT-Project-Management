@@ -2,6 +2,7 @@ const express = require('express');
 const { body, validationResult } = require('express-validator');
 const { authenticateToken, authorizePermission } = require('../../middleware/auth');
 const { query: dbQuery } = require('../../config/database');
+const { checkProjectAvailable } = require('../../utils/pmProjectCheck');
 const { getEffectiveWorkspaceRole } = require('../../utils/roleMapper');
 
 const router = express.Router();
@@ -31,6 +32,14 @@ router.get('/workspace/:workspaceId', authorizePermission('projects', 'view'), a
       return res.status(403).json({
         success: false,
         message: 'Access denied. You do not have access to this workspace.'
+      });
+    }
+
+    const projectCheck = await checkProjectAvailable(workspaceId);
+    if (projectCheck) {
+      return res.status(projectCheck.status).json({
+        success: false,
+        message: projectCheck.message
       });
     }
 
@@ -141,6 +150,14 @@ router.put('/workspace/:workspaceId', authorizePermission('projects', 'edit'), [
       });
     }
 
+    const projectCheck = await checkProjectAvailable(workspaceId);
+    if (projectCheck) {
+      return res.status(projectCheck.status).json({
+        success: false,
+        message: projectCheck.message
+      });
+    }
+
     // Build update query
     const updateFields = [];
     const updateValues = [];
@@ -230,6 +247,14 @@ router.post('/workspace/:workspaceId/members', authorizePermission('projects', '
       return res.status(403).json({
         success: false,
         message: 'Access denied. Only workspace owners and admins can add members.'
+      });
+    }
+
+    const projectCheck = await checkProjectAvailable(workspaceId);
+    if (projectCheck) {
+      return res.status(projectCheck.status).json({
+        success: false,
+        message: projectCheck.message
       });
     }
 
@@ -342,6 +367,14 @@ router.put('/workspace/:workspaceId/members/:memberId', authorizePermission('pro
       return res.status(403).json({
         success: false,
         message: 'Access denied. Only workspace owners and admins can update members.'
+      });
+    }
+
+    const projectCheck = await checkProjectAvailable(workspaceId);
+    if (projectCheck) {
+      return res.status(projectCheck.status).json({
+        success: false,
+        message: projectCheck.message
       });
     }
 
@@ -460,6 +493,14 @@ router.delete('/workspace/:workspaceId/members/:memberId', authorizePermission('
       return res.status(403).json({
         success: false,
         message: 'Access denied. Only workspace owners and admins can remove members.'
+      });
+    }
+
+    const projectCheck = await checkProjectAvailable(workspaceId);
+    if (projectCheck) {
+      return res.status(projectCheck.status).json({
+        success: false,
+        message: projectCheck.message
       });
     }
 

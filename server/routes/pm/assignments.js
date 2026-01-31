@@ -2,6 +2,7 @@ const express = require('express');
 const { body, validationResult } = require('express-validator');
 const { authenticateToken, authorizePermission } = require('../../middleware/auth');
 const { query: dbQuery } = require('../../config/database');
+const { checkProjectAvailable } = require('../../utils/pmProjectCheck');
 const { logAssignment } = require('../../utils/activityLogger');
 
 const router = express.Router();
@@ -121,6 +122,14 @@ router.post('/user-stories/:id/assign', authorizePermission('projects', 'edit'),
       return res.status(403).json({
         success: false,
         message: 'Access denied. You do not have access to this workspace.'
+      });
+    }
+
+    const projectCheck = await checkProjectAvailable(existingStory.workspace_id);
+    if (projectCheck) {
+      return res.status(projectCheck.status).json({
+        success: false,
+        message: projectCheck.message
       });
     }
 
@@ -244,6 +253,14 @@ router.post('/tasks/:id/assign', authorizePermission('projects', 'edit'), [
       return res.status(403).json({
         success: false,
         message: 'Access denied. You do not have access to this workspace.'
+      });
+    }
+
+    const projectCheck = await checkProjectAvailable(existingTask.workspace_id);
+    if (projectCheck) {
+      return res.status(projectCheck.status).json({
+        success: false,
+        message: projectCheck.message
       });
     }
 

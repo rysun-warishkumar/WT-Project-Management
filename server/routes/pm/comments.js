@@ -2,6 +2,7 @@ const express = require('express');
 const { body, validationResult } = require('express-validator');
 const { authenticateToken, authorizePermission } = require('../../middleware/auth');
 const { query: dbQuery } = require('../../config/database');
+const { checkProjectAvailable } = require('../../utils/pmProjectCheck');
 
 const router = express.Router();
 
@@ -372,10 +373,50 @@ router.delete('/:id', authorizePermission('projects', 'delete'), async (req, res
             message: 'Access denied. You can only delete your own comments or be a workspace admin.'
           });
         }
+
+        const projectCheck = await checkProjectAvailable(workspaceId);
+        if (projectCheck) {
+          return res.status(projectCheck.status).json({
+            success: false,
+            message: projectCheck.message
+          });
+        }
       } else {
         return res.status(403).json({
           success: false,
           message: 'Access denied. You can only delete your own comments.'
+        });
+      }
+    }
+
+    // Resolve workspace for project check (when user is creator we may not have workspaceId in scope)
+    let workspaceIdForCheck;
+    if (existingComment.entity_type === 'user_story') {
+      const [story] = await dbQuery(
+        'SELECT workspace_id FROM pm_user_stories WHERE id = ?',
+        [existingComment.entity_id]
+      );
+      workspaceIdForCheck = story?.workspace_id;
+    } else if (existingComment.entity_type === 'task') {
+      const [task] = await dbQuery(
+        `SELECT us.workspace_id FROM pm_tasks t
+         LEFT JOIN pm_user_stories us ON t.user_story_id = us.id WHERE t.id = ?`,
+        [existingComment.entity_id]
+      );
+      workspaceIdForCheck = task?.workspace_id;
+    } else if (existingComment.entity_type === 'epic') {
+      const [epic] = await dbQuery(
+        'SELECT workspace_id FROM pm_epics WHERE id = ?',
+        [existingComment.entity_id]
+      );
+      workspaceIdForCheck = epic?.workspace_id;
+    }
+    if (workspaceIdForCheck) {
+      const projectCheck = await checkProjectAvailable(workspaceIdForCheck);
+      if (projectCheck) {
+        return res.status(projectCheck.status).json({
+          success: false,
+          message: projectCheck.message
         });
       }
     }

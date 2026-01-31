@@ -2,6 +2,7 @@ const express = require('express');
 const { body, validationResult, query: validatorQuery } = require('express-validator');
 const { authenticateToken, authorizePermission } = require('../../middleware/auth');
 const { query: dbQuery } = require('../../config/database');
+const { checkProjectAvailable } = require('../../utils/pmProjectCheck');
 
 const router = express.Router();
 
@@ -326,6 +327,14 @@ router.post('/', authorizePermission('projects', 'create'), [
       });
     }
 
+    const projectCheck = await checkProjectAvailable(workspace_id);
+    if (projectCheck) {
+      return res.status(projectCheck.status).json({
+        success: false,
+        message: projectCheck.message
+      });
+    }
+
     // Check for overlapping active sprints
     const [overlapping] = await dbQuery(
       `SELECT id FROM pm_sprints 
@@ -589,6 +598,14 @@ router.delete('/:id', authorizePermission('projects', 'delete'), async (req, res
       return res.status(403).json({
         success: false,
         message: 'Access denied. Only workspace owners and admins can delete sprints.'
+      });
+    }
+
+    const projectCheck = await checkProjectAvailable(existingSprint.workspace_id);
+    if (projectCheck) {
+      return res.status(projectCheck.status).json({
+        success: false,
+        message: projectCheck.message
       });
     }
 

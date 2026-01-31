@@ -2,6 +2,7 @@ const express = require('express');
 const { body, validationResult } = require('express-validator');
 const { authenticateToken, authorizePermission } = require('../../middleware/auth');
 const { query: dbQuery } = require('../../config/database');
+const { checkProjectAvailable } = require('../../utils/pmProjectCheck');
 const { generateEpicReference } = require('../../utils/referenceNumberGenerator');
 const { logCreation } = require('../../utils/activityLogger');
 
@@ -230,6 +231,14 @@ router.post('/', authorizePermission('projects', 'create'), [
       });
     }
 
+    const projectCheck = await checkProjectAvailable(workspace_id);
+    if (projectCheck) {
+      return res.status(projectCheck.status).json({
+        success: false,
+        message: projectCheck.message
+      });
+    }
+
     // Generate reference number
     const referenceNumber = await generateEpicReference(workspace_id);
 
@@ -433,6 +442,14 @@ router.delete('/:id', authorizePermission('projects', 'delete'), async (req, res
       return res.status(403).json({
         success: false,
         message: 'Access denied. Only workspace owners and admins can delete epics.'
+      });
+    }
+
+    const projectCheck = await checkProjectAvailable(epic.workspace_id);
+    if (projectCheck) {
+      return res.status(projectCheck.status).json({
+        success: false,
+        message: projectCheck.message
       });
     }
 

@@ -2,6 +2,7 @@ const express = require('express');
 const { body, validationResult, query } = require('express-validator');
 const { authenticateToken, authorizePermission } = require('../../middleware/auth');
 const { query: dbQuery } = require('../../config/database');
+const { checkProjectAvailable } = require('../../utils/pmProjectCheck');
 
 const router = express.Router();
 
@@ -30,6 +31,14 @@ router.get('/workspace/:workspaceId/room', authorizePermission('pm_chat', 'view'
       return res.status(403).json({
         success: false,
         message: 'Access denied. You do not have access to this workspace.'
+      });
+    }
+
+    const projectCheck = await checkProjectAvailable(workspaceId);
+    if (projectCheck) {
+      return res.status(projectCheck.status).json({
+        success: false,
+        message: projectCheck.message
       });
     }
 
@@ -235,6 +244,20 @@ router.post('/room/:roomId/messages', authorizePermission('pm_chat', 'create'), 
         success: false,
         message: 'Access denied. You are not a participant in this chat room.'
       });
+    }
+
+    const [chatRoomForCheck] = await dbQuery(
+      'SELECT workspace_id FROM pm_chat_rooms WHERE id = ?',
+      [roomId]
+    );
+    if (chatRoomForCheck) {
+      const projectCheck = await checkProjectAvailable(chatRoomForCheck.workspace_id);
+      if (projectCheck) {
+        return res.status(projectCheck.status).json({
+          success: false,
+          message: projectCheck.message
+        });
+      }
     }
 
     // Validate mentions - ensure all mentioned users are workspace members

@@ -2,6 +2,7 @@ const express = require('express');
 const { body, validationResult, query: validatorQuery } = require('express-validator');
 const { authenticateToken, authorizePermission } = require('../../middleware/auth');
 const { query: dbQuery } = require('../../config/database');
+const { checkProjectAvailable } = require('../../utils/pmProjectCheck');
 const { logCreation, logUpdate, logDeletion, logStatusChange, logAssignment } = require('../../utils/activityLogger');
 const { generateTaskReference, generateSubtaskReference } = require('../../utils/referenceNumberGenerator');
 
@@ -440,6 +441,14 @@ router.put('/:id', authorizePermission('projects', 'edit'), [
       });
     }
 
+    const projectCheck = await checkProjectAvailable(existingTask.workspace_id);
+    if (projectCheck) {
+      return res.status(projectCheck.status).json({
+        success: false,
+        message: projectCheck.message
+      });
+    }
+
     // Build update query
     const updateFields = [];
     const updateValues = [];
@@ -589,6 +598,14 @@ router.delete('/:id', authorizePermission('projects', 'delete'), async (req, res
       return res.status(403).json({
         success: false,
         message: 'Access denied. Only workspace owners and admins can delete tasks.'
+      });
+    }
+
+    const projectCheck = await checkProjectAvailable(existingTask.workspace_id);
+    if (projectCheck) {
+      return res.status(projectCheck.status).json({
+        success: false,
+        message: projectCheck.message
       });
     }
 

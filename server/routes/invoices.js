@@ -400,10 +400,10 @@ router.post('/', authorizePermission('invoices', 'create'), validateInvoice, asy
       return res.status(403).json({ success: false, message: 'Workspace context required' });
     }
 
-    // Check if client exists
+    // Check if client exists and is not soft-deleted
     const wsCli = getWorkspaceFilter(req, '', 'workspace_id');
     const clientCheck = await dbQuery(
-      `SELECT id FROM clients WHERE id = ? ${wsCli.whereClause}`,
+      `SELECT id FROM clients WHERE id = ? AND deleted_at IS NULL ${wsCli.whereClause}`,
       [client_id, ...wsCli.whereParams]
     );
     if (clientCheck.length === 0) {
@@ -413,11 +413,11 @@ router.post('/', authorizePermission('invoices', 'create'), validateInvoice, asy
       });
     }
 
-    // Check if project exists (if provided)
+    // Check if project exists and is not soft-deleted (if provided)
     if (project_id) {
       const wsProj = getWorkspaceFilter(req, '', 'workspace_id');
       const projectCheck = await dbQuery(
-        `SELECT id FROM projects WHERE id = ? ${wsProj.whereClause}`,
+        `SELECT id FROM projects WHERE id = ? AND deleted_at IS NULL ${wsProj.whereClause}`,
         [project_id, ...wsProj.whereParams]
       );
       if (projectCheck.length === 0) {
@@ -521,6 +521,19 @@ router.post('/', authorizePermission('invoices', 'create'), validateInvoice, asy
     });
   } catch (error) {
     console.error('Error creating invoice:', error);
+    // Return user-friendly message for duplicate invoice number
+    if (error.code === 'ER_DUP_ENTRY' && error.sqlMessage && error.sqlMessage.includes('invoice_number')) {
+      return res.status(409).json({
+        success: false,
+        message: 'An invoice with this invoice number already exists. Please use a different invoice number.'
+      });
+    }
+    if (error.code === 'ER_DUP_ENTRY') {
+      return res.status(409).json({
+        success: false,
+        message: error.sqlMessage || 'A record with this value already exists. Please use a different value.'
+      });
+    }
     res.status(500).json({
       success: false,
       message: 'Failed to create invoice'
@@ -688,6 +701,18 @@ router.put('/:id', authorizePermission('invoices', 'edit'), validateInvoice, asy
     });
   } catch (error) {
     console.error('Error updating invoice:', error);
+    if (error.code === 'ER_DUP_ENTRY' && error.sqlMessage && error.sqlMessage.includes('invoice_number')) {
+      return res.status(409).json({
+        success: false,
+        message: 'An invoice with this invoice number already exists. Please use a different invoice number.'
+      });
+    }
+    if (error.code === 'ER_DUP_ENTRY') {
+      return res.status(409).json({
+        success: false,
+        message: error.sqlMessage || 'A record with this value already exists. Please use a different value.'
+      });
+    }
     res.status(500).json({
       success: false,
       message: 'Failed to update invoice'

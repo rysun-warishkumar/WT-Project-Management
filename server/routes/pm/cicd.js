@@ -3,6 +3,7 @@ const { body, validationResult } = require('express-validator');
 const crypto = require('crypto');
 const { authenticateToken, authorizePermission } = require('../../middleware/auth');
 const { query: dbQuery } = require('../../config/database');
+const { checkProjectAvailable } = require('../../utils/pmProjectCheck');
 const { logActivity } = require('../../utils/activityLogger');
 
 const router = express.Router();
@@ -344,6 +345,14 @@ router.put('/:id', authorizePermission('projects', 'edit'), [
       });
     }
 
+    const projectCheck = await checkProjectAvailable(existingIntegration.workspace_id);
+    if (projectCheck) {
+      return res.status(projectCheck.status).json({
+        success: false,
+        message: projectCheck.message
+      });
+    }
+
     // Build update query
     const updateFields = [];
     const updateValues = [];
@@ -467,6 +476,14 @@ router.delete('/:id', authorizePermission('projects', 'delete'), async (req, res
       return res.status(403).json({
         success: false,
         message: 'Access denied. Only workspace owners can delete CI/CD integrations.'
+      });
+    }
+
+    const projectCheck = await checkProjectAvailable(existingIntegration.workspace_id);
+    if (projectCheck) {
+      return res.status(projectCheck.status).json({
+        success: false,
+        message: projectCheck.message
       });
     }
 
@@ -638,6 +655,14 @@ router.post('/task/:taskId/links', authorizePermission('projects', 'create'), [
       return res.status(403).json({
         success: false,
         message: 'Access denied. You do not have access to this workspace.'
+      });
+    }
+
+    const projectCheck = await checkProjectAvailable(task.workspace_id);
+    if (projectCheck) {
+      return res.status(projectCheck.status).json({
+        success: false,
+        message: projectCheck.message
       });
     }
 
@@ -877,6 +902,14 @@ router.delete('/links/:linkId', authorizePermission('projects', 'delete'), async
       return res.status(403).json({
         success: false,
         message: 'Access denied. You do not have access to this link.'
+      });
+    }
+
+    const projectCheck = await checkProjectAvailable(existingLink.workspace_id);
+    if (projectCheck) {
+      return res.status(projectCheck.status).json({
+        success: false,
+        message: projectCheck.message
       });
     }
 

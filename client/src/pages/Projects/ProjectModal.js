@@ -14,6 +14,7 @@ const ProjectModal = ({ isOpen, onClose, onSuccess, project }) => {
     register,
     handleSubmit,
     reset,
+    setError,
     formState: { errors, isSubmitting },
     watch,
   } = useForm();
@@ -89,7 +90,15 @@ const ProjectModal = ({ isOpen, onClose, onSuccess, project }) => {
         onSuccess();
       },
       onError: (error) => {
-        toast.error(error.response?.data?.message || 'Failed to create project');
+        const data = error.response?.data;
+        const msg = data?.message || 'Unable to create project. Please fix the errors below.';
+        if (Array.isArray(data?.errors) && data.errors.length > 0) {
+          data.errors.forEach((err) => {
+            const field = err.field || err.path;
+            if (field) setError(field, { type: 'server', message: err.message || err.msg });
+          });
+        }
+        toast.error(msg);
       },
     }
   );
@@ -104,7 +113,15 @@ const ProjectModal = ({ isOpen, onClose, onSuccess, project }) => {
         onSuccess();
       },
       onError: (error) => {
-        toast.error(error.response?.data?.message || 'Failed to update project');
+        const data = error.response?.data;
+        const msg = data?.message || 'Unable to update project. Please fix the errors below.';
+        if (Array.isArray(data?.errors) && data.errors.length > 0) {
+          data.errors.forEach((err) => {
+            const field = err.field || err.path;
+            if (field) setError(field, { type: 'server', message: err.message || err.msg });
+          });
+        }
+        toast.error(msg);
       },
     }
   );

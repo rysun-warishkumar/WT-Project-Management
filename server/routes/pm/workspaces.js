@@ -2,6 +2,7 @@ const express = require('express');
 const { body, validationResult, query: validatorQuery } = require('express-validator');
 const { authenticateToken, authorizePermission } = require('../../middleware/auth');
 const { query: dbQuery } = require('../../config/database');
+const { checkProjectAvailable } = require('../../utils/pmProjectCheck');
 
 const router = express.Router();
 
@@ -13,7 +14,7 @@ router.get('/', authorizePermission('projects', 'view'), async (req, res) => {
   try {
     const userId = req.user.id;
     
-    // Get workspaces where user is a member or owns
+    // Get workspaces where user is a member or owns (only where project still exists; after soft delete add AND p.deleted_at IS NULL)
     const workspaces = await dbQuery(
       `SELECT 
         w.*,
@@ -22,14 +23,14 @@ router.get('/', authorizePermission('projects', 'view'), async (req, res) => {
         c.company_name as client_company,
         COUNT(DISTINCT wm.user_id) as member_count
        FROM pm_workspaces w
-       LEFT JOIN projects p ON w.project_id = p.id
+       INNER JOIN projects p ON w.project_id = p.id AND p.deleted_at IS NULL
        LEFT JOIN clients c ON w.client_id = c.id
        LEFT JOIN pm_workspace_members wm ON w.id = wm.workspace_id
-       WHERE w.id IN (
+       WHERE (w.id IN (
          SELECT workspace_id 
          FROM pm_workspace_members 
          WHERE user_id = ?
-       ) OR w.created_by = ?
+       ) OR w.created_by = ?)
        GROUP BY w.id
        ORDER BY w.created_at DESC`,
       [userId, userId]
@@ -96,6 +97,14 @@ router.get('/:id', authorizePermission('projects', 'view'), async (req, res) => 
       });
     }
 
+    const projectCheck = await checkProjectAvailable(workspaceId);
+    if (projectCheck) {
+      return res.status(projectCheck.status).json({
+        success: false,
+        message: projectCheck.message
+      });
+    }
+
     // Get workspace members
     const members = await dbQuery(
       `SELECT 
@@ -139,12 +148,12 @@ router.get('/project/:projectId', authorizePermission('projects', 'view'), async
     const projectId = req.params.projectId;
     const userId = req.user.id;
 
-    // Check if project exists and user has access
+    // Check if project exists (not soft-deleted) and user has access
     const [project] = await dbQuery(
       `SELECT p.*, c.id as client_id 
        FROM projects p
        LEFT JOIN clients c ON p.client_id = c.id
-       WHERE p.id = ?`,
+       WHERE p.id = ? AND p.deleted_at IS NULL`,
       [projectId]
     );
 

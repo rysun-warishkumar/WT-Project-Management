@@ -2,6 +2,7 @@ const express = require('express');
 const { body, validationResult, query: validatorQuery } = require('express-validator');
 const { authenticateToken, authorizePermission } = require('../../middleware/auth');
 const { query: dbQuery } = require('../../config/database');
+const { checkProjectAvailable } = require('../../utils/pmProjectCheck');
 const { logCreation, logUpdate, logDeletion, logStatusChange, logAssignment } = require('../../utils/activityLogger');
 const { generateUserStoryReference } = require('../../utils/referenceNumberGenerator');
 
@@ -276,6 +277,14 @@ router.post('/', authorizePermission('projects', 'create'), [
       return res.status(403).json({
         success: false,
         message: 'Access denied. You do not have access to this workspace.'
+      });
+    }
+
+    const projectCheck = await checkProjectAvailable(workspace_id);
+    if (projectCheck) {
+      return res.status(projectCheck.status).json({
+        success: false,
+        message: projectCheck.message
       });
     }
 
@@ -614,6 +623,14 @@ router.delete('/:id', authorizePermission('projects', 'delete'), async (req, res
       return res.status(403).json({
         success: false,
         message: 'Access denied. Only workspace owners and admins can delete user stories.'
+      });
+    }
+
+    const projectCheck = await checkProjectAvailable(existingStory.workspace_id);
+    if (projectCheck) {
+      return res.status(projectCheck.status).json({
+        success: false,
+        message: projectCheck.message
       });
     }
 

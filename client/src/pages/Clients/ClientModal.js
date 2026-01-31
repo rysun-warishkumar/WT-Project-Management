@@ -13,6 +13,7 @@ const ClientModal = ({ isOpen, onClose, onSuccess, client }) => {
     register,
     handleSubmit,
     reset,
+    setError,
     formState: { errors },
     setValue,
   } = useForm();
@@ -34,10 +35,15 @@ const ClientModal = ({ isOpen, onClose, onSuccess, client }) => {
         onSuccess();
       },
       onError: (error) => {
-        toast.error(
-          error.response?.data?.message || 
-          (client ? 'Failed to update client' : 'Failed to create client')
-        );
+        const data = error.response?.data;
+        const msg = data?.message || (client ? 'Unable to update client. Please fix the errors below.' : 'Unable to create client. Please fix the errors below.');
+        if (Array.isArray(data?.errors) && data.errors.length > 0) {
+          data.errors.forEach((err) => {
+            const field = err.field || err.path;
+            if (field) setError(field, { type: 'server', message: err.message || err.msg });
+          });
+        }
+        toast.error(msg);
       },
       onSettled: () => {
         setIsSubmitting(false);
