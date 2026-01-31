@@ -251,6 +251,7 @@ const Settings = () => {
       await changePasswordMutation.mutateAsync({
         currentPassword: data.currentPassword,
         newPassword: data.newPassword,
+        confirmPassword: data.confirmPassword,
       });
     } catch (error) {
       // Error handled in mutation
