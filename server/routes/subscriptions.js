@@ -46,6 +46,7 @@ router.get('/', async (req, res) => {
         (SELECT COUNT(*) FROM workspace_members wm WHERE wm.workspace_id = w.id AND wm.status = 'active') as user_count
        FROM workspaces w
        LEFT JOIN users u ON w.owner_id = u.id
+       WHERE (COALESCE(w.active, 1) = 1)
        ORDER BY w.created_at DESC`
     );
 
@@ -93,7 +94,7 @@ router.patch(
       const { trial_ends_at } = req.body;
 
       const existing = await dbQuery(
-        'SELECT id, name, trial_ends_at FROM workspaces WHERE id = ?',
+        'SELECT id, name, trial_ends_at FROM workspaces WHERE id = ? AND (COALESCE(active, 1) = 1)',
         [workspaceId]
       );
       if (existing.length === 0) {
@@ -116,7 +117,7 @@ router.patch(
       }
 
       const [updated] = await dbQuery(
-        'SELECT id, name, slug, trial_ends_at, subscription_id, status FROM workspaces WHERE id = ?',
+        'SELECT id, name, slug, trial_ends_at, subscription_id, status FROM workspaces WHERE id = ? AND (COALESCE(active, 1) = 1)',
         [workspaceId]
       );
 
@@ -134,5 +135,46 @@ router.patch(
     }
   }
 );
+
+// DELETE /api/subscriptions/:id - soft delete workspace (set active = 0)
+router.delete('/:id', async (req, res) => {
+  try {
+    const workspaceId = req.params.id;
+    const idNum = workspaceId === '' || workspaceId === undefined ? NaN : parseInt(workspaceId, 10);
+    if (isNaN(idNum) && workspaceId !== '0') {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid workspace ID',
+      });
+    }
+
+    const existing = await dbQuery(
+      'SELECT id, name FROM workspaces WHERE id = ? AND (COALESCE(active, 1) = 1)',
+      [workspaceId]
+    );
+    if (existing.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Workspace not found',
+      });
+    }
+
+    await dbQuery(
+      'UPDATE workspaces SET active = 0 WHERE id = ?',
+      [workspaceId]
+    );
+
+    res.json({
+      success: true,
+      message: 'Workspace deleted successfully',
+    });
+  } catch (error) {
+    console.error('Error deleting workspace:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to delete workspace',
+    });
+  }
+});
 
 module.exports = router;

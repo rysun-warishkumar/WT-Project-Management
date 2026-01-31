@@ -327,7 +327,37 @@ router.post('/', authorizePermission('users', 'create'), validateUser, async (re
       ]
     );
 
-    const userId = result.insertId;
+    let userId = result.insertId != null ? Number(result.insertId) : 0;
+    if (userId <= 0) {
+      const nextRows = await dbQuery(
+        'SELECT COALESCE(MAX(id), 0) + 1 AS next_id FROM users WHERE id > 0'
+      );
+      const nextId = nextRows?.[0]?.next_id ? Number(nextRows[0].next_id) : 1;
+      try {
+        const updateResult = await dbQuery(
+          'UPDATE users SET id = ? WHERE id = 0 AND email = ? LIMIT 1',
+          [nextId, email]
+        );
+        const affected = updateResult?.affectedRows;
+        if (affected >= 1) {
+          userId = nextId;
+          try {
+            await dbQuery(`ALTER TABLE users AUTO_INCREMENT = ${Number(nextId) + 1}`);
+          } catch (e) {
+            console.warn('Could not bump users AUTO_INCREMENT:', e.message);
+          }
+        }
+      } catch (err) {
+        if (err.code !== 'ER_DUP_ENTRY') throw err;
+      }
+    }
+    if (!userId || userId <= 0) {
+      const fallback = await dbQuery(
+        'SELECT id FROM users WHERE email = ? ORDER BY id DESC LIMIT 1',
+        [email]
+      );
+      if (fallback?.[0]?.id) userId = Number(fallback[0].id);
+    }
 
     // Fetch the created user
     const users = await dbQuery(

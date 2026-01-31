@@ -113,7 +113,7 @@ const authenticateToken = async (req, res, next) => {
       const workspaces = await query(
         `SELECT id, name, slug, owner_id, plan_type, status, trial_ends_at, subscription_id 
          FROM workspaces 
-         WHERE id = ? AND status = 'active'`,
+         WHERE id = ? AND status = 'active' AND (COALESCE(active, 1) = 1)`,
         [user.workspace_id]
       );
       if (workspaces.length > 0) {
@@ -124,7 +124,7 @@ const authenticateToken = async (req, res, next) => {
       const memberships = await query(
         `SELECT w.id, w.name, w.slug, w.owner_id, w.plan_type, w.status, w.trial_ends_at, w.subscription_id, wm.role as workspace_role
          FROM workspace_members wm
-         INNER JOIN workspaces w ON wm.workspace_id = w.id
+         INNER JOIN workspaces w ON wm.workspace_id = w.id AND (COALESCE(w.active, 1) = 1)
          WHERE wm.user_id = ? AND wm.status = 'active' AND w.status = 'active'
          ORDER BY wm.joined_at DESC
          LIMIT 1`,

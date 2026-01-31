@@ -36,6 +36,7 @@ api.interceptors.response.use(
 export const subscriptionsAPI = {
   getAll: () => api.get('/subscriptions'),
   updateTrial: (workspaceId, data) => api.patch(`/subscriptions/${workspaceId}/trial`, data),
+  deleteWorkspace: (id) => api.delete(`/subscriptions/${id}`),
 };
 
 // Inquiries from public website contact form – super admin only

@@ -35,7 +35,7 @@ const generateUniqueSlug = async (workspaceName) => {
   // Check if slug exists
   while (true) {
     const existing = await query(
-      'SELECT id FROM workspaces WHERE slug = ?',
+      'SELECT id FROM workspaces WHERE slug = ? AND (COALESCE(active, 1) = 1)',
       [slug]
     );
 
@@ -89,7 +89,7 @@ const getUserWorkspaceContext = async (userId) => {
         w.subscription_id,
         w.created_at as workspace_created_at
       FROM workspace_members wm
-      INNER JOIN workspaces w ON wm.workspace_id = w.id
+      INNER JOIN workspaces w ON wm.workspace_id = w.id AND (COALESCE(w.active, 1) = 1)
       WHERE wm.user_id = ? AND wm.status = 'active' AND w.status = 'active'
       ORDER BY wm.joined_at DESC
       LIMIT 1`,
@@ -147,7 +147,7 @@ const getUserWorkspaces = async (userId, isSuperAdmin = false) => {
           wm.status as membership_status
         FROM workspaces w
         INNER JOIN workspace_members wm ON w.id = wm.workspace_id
-        WHERE wm.user_id = ? AND wm.status = 'active' AND w.status = 'active'
+        WHERE wm.user_id = ? AND wm.status = 'active' AND w.status = 'active' AND (COALESCE(w.active, 1) = 1)
         ORDER BY wm.joined_at DESC`,
         [userId]
       );

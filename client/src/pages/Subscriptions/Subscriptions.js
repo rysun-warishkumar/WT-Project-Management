@@ -10,6 +10,7 @@ import {
   CheckCircle,
   XCircle,
   User,
+  Trash2,
 } from 'lucide-react';
 import { subscriptionsAPI } from '../../services/api';
 import toast from 'react-hot-toast';
@@ -55,6 +56,19 @@ export default function Subscriptions() {
       },
       onError: (err) => {
         toast.error(err.response?.data?.message || 'Failed to update trial');
+      },
+    }
+  );
+
+  const deleteWorkspaceMutation = useMutation(
+    (id) => subscriptionsAPI.deleteWorkspace(id),
+    {
+      onSuccess: () => {
+        queryClient.invalidateQueries('subscriptions');
+        toast.success('Workspace deleted');
+      },
+      onError: (err) => {
+        toast.error(err.response?.data?.message || 'Failed to delete workspace');
       },
     }
   );
@@ -228,12 +242,23 @@ export default function Subscriptions() {
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-right">
                       {editingId !== sub.id && (
-                        <button
-                          onClick={() => handleStartEdit(sub)}
-                          className="text-primary-600 hover:text-primary-900 text-sm font-medium"
-                        >
-                          Edit trial
-                        </button>
+                        <div className="flex items-center justify-end gap-2">
+                          <button
+                            onClick={() => handleStartEdit(sub)}
+                            className="text-primary-600 hover:text-primary-900 text-sm font-medium"
+                          >
+                            Edit trial
+                          </button>
+                          <button
+                            onClick={() => handleDeleteWorkspace(sub)}
+                            disabled={deleteWorkspaceMutation.isLoading}
+                            className="text-red-600 hover:text-red-800 text-sm font-medium flex items-center gap-1"
+                            title="Delete workspace (soft delete)"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                            Delete
+                          </button>
+                        </div>
                       )}
                     </td>
                   </tr>

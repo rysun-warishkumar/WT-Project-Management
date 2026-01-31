@@ -64,7 +64,7 @@ const workspaceContext = async (req, res, next) => {
 
     // Verify workspace exists, is active, and trial/subscription allows access
     const workspaces = await query(
-      'SELECT id, name, status, trial_ends_at, subscription_id FROM workspaces WHERE id = ?',
+      'SELECT id, name, status, trial_ends_at, subscription_id FROM workspaces WHERE id = ? AND (COALESCE(active, 1) = 1)',
       [workspaceId]
     );
 
@@ -143,7 +143,7 @@ const verifyWorkspaceAccess = async (req, res, next) => {
     const memberships = await query(
       `SELECT wm.workspace_id, wm.role, w.status
        FROM workspace_members wm
-       INNER JOIN workspaces w ON wm.workspace_id = w.id
+       INNER JOIN workspaces w ON wm.workspace_id = w.id AND (COALESCE(w.active, 1) = 1)
        WHERE wm.user_id = ? AND wm.workspace_id = ? AND wm.status = 'active' AND w.status = 'active'`,
       [user.id, requestedWorkspaceId]
     );

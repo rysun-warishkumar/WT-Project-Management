@@ -150,8 +150,8 @@ router.get('/profile', authenticateToken, async (req, res) => {
       if (err && (err.code === 'ER_BAD_FIELD_ERROR' || String(err.message || '').includes('Unknown column'))) {
         users = await query(
           'SELECT id, username, email, full_name, role, avatar, is_active, last_login, created_at, updated_at, client_id FROM users WHERE id = ?',
-          [req.user.id]
-        );
+      [req.user.id]
+    );
       } else {
         throw err;
       }
@@ -476,14 +476,30 @@ router.post('/register', registerValidation, async (req, res) => {
     let result;
     try {
       result = await transaction(async (connection) => {
+        let fixedUser = false;
+        let fixedWorkspace = false;
+        const userEmail = email.trim().toLowerCase();
+
         // 1. Create user (unverified)
         const [userResult] = await connection.execute(
           `INSERT INTO users (email, password, full_name, username, role, email_verified, email_verification_token, registration_source, is_active)
            VALUES (?, ?, ?, ?, 'admin', FALSE, ?, 'web', TRUE)`,
-          [email.trim().toLowerCase(), hashedPassword, full_name.trim(), email.trim().toLowerCase(), verificationToken]
+          [userEmail, hashedPassword, full_name.trim(), userEmail, verificationToken]
         );
 
-        const userId = userResult.insertId;
+        let userId = userResult.insertId != null ? Number(userResult.insertId) : 0;
+        if (userId <= 0) {
+          const [[nextRow]] = await connection.execute(
+            'SELECT COALESCE(MAX(id), 0) + 1 AS next_id FROM users WHERE id > 0'
+          );
+          const nextId = nextRow?.next_id ? Number(nextRow.next_id) : 1;
+          await connection.execute(
+            'UPDATE users SET id = ? WHERE id = 0 AND email = ? LIMIT 1',
+            [nextId, userEmail]
+          );
+          userId = nextId;
+          fixedUser = true;
+        }
 
         // 2. Create workspace (30-day trial from creation)
         const [workspaceResult] = await connection.execute(
@@ -492,7 +508,19 @@ router.post('/register', registerValidation, async (req, res) => {
           [workspace_name.trim(), workspaceSlug, userId]
         );
 
-        const workspaceId = workspaceResult.insertId;
+        let workspaceId = workspaceResult.insertId != null ? Number(workspaceResult.insertId) : 0;
+        if (workspaceId <= 0) {
+          const [[nextRow]] = await connection.execute(
+            'SELECT COALESCE(MAX(id), 0) + 1 AS next_id FROM workspaces WHERE id > 0'
+          );
+          const nextId = nextRow?.next_id ? Number(nextRow.next_id) : 1;
+          await connection.execute(
+            'UPDATE workspaces SET id = ? WHERE id = 0 AND slug = ? LIMIT 1',
+            [nextId, workspaceSlug]
+          );
+          workspaceId = nextId;
+          fixedWorkspace = true;
+        }
 
         // 3. Update user with workspace_id
         await connection.execute(
@@ -507,7 +535,7 @@ router.post('/register', registerValidation, async (req, res) => {
           [workspaceId, userId]
         );
 
-        return { userId, workspaceId, verificationToken };
+        return { userId, workspaceId, verificationToken, fixedUser, fixedWorkspace };
       });
     } catch (dbError) {
       console.error('Registration transaction error:', dbError);
@@ -542,6 +570,26 @@ router.post('/register', registerValidation, async (req, res) => {
         success: false,
         message: 'Registration failed due to a database error. Please try again.',
       });
+    }
+
+    // Bump AUTO_INCREMENT when we fixed id=0 on live (broken AUTO_INCREMENT)
+    if (result.fixedUser) {
+      try {
+        const rows = await query('SELECT COALESCE(MAX(id), 0) + 1 AS next FROM users WHERE id > 0');
+        const next = rows?.[0]?.next != null ? Number(rows[0].next) : 1;
+        await query(`ALTER TABLE users AUTO_INCREMENT = ${next}`);
+      } catch (e) {
+        console.warn('Could not bump users AUTO_INCREMENT:', e.message);
+      }
+    }
+    if (result.fixedWorkspace) {
+      try {
+        const rows = await query('SELECT COALESCE(MAX(id), 0) + 1 AS next FROM workspaces WHERE id > 0');
+        const next = rows?.[0]?.next != null ? Number(rows[0].next) : 1;
+        await query(`ALTER TABLE workspaces AUTO_INCREMENT = ${next}`);
+      } catch (e) {
+        console.warn('Could not bump workspaces AUTO_INCREMENT:', e.message);
+      }
     }
 
     // Send verification email
