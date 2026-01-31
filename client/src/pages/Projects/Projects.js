@@ -407,16 +407,23 @@ const Projects = () => {
                           <ProjectChatButton project={project} />
                           <button
                             onClick={async () => {
+                              const projectId = project?.id != null ? Number(project.id) : NaN;
+                              if (!Number.isInteger(projectId) || projectId <= 0) {
+                                toast.error('Project management is not available for this project.');
+                                return;
+                              }
                               try {
-                                // Get or create workspace for this project
                                 const response = await pmAPI.getWorkspaceByProject(project.id);
                                 if (response.data.success) {
                                   const workspace = response.data.data;
-                                  // Open PM workspace in new tab
-                                  window.open(`/project-management/${workspace.id}`, '_blank');
+                                  if (workspace?.id != null && Number(workspace.id) !== 0) {
+                                    window.open(`/project-management/${workspace.id}`, '_blank');
+                                  } else {
+                                    toast.error('Project workspace not found.');
+                                  }
                                 }
                               } catch (error) {
-                                toast.error('Failed to open project management workspace');
+                                toast.error(error?.response?.data?.message || 'Failed to open project management workspace');
                                 console.error('Error opening PM workspace:', error);
                               }
                             }}

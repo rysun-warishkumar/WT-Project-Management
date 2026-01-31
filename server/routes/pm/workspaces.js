@@ -148,6 +148,15 @@ router.get('/project/:projectId', authorizePermission('projects', 'view'), async
     const projectId = req.params.projectId;
     const userId = req.user.id;
 
+    // Reject invalid project id (e.g. 0 from broken AUTO_INCREMENT) so chat/PM don't get bad workspace
+    const projectIdNum = projectId === '' || projectId === undefined ? NaN : parseInt(projectId, 10);
+    if (!Number.isInteger(projectIdNum) || projectIdNum <= 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Project not found'
+      });
+    }
+
     // Check if project exists (not soft-deleted) and user has access
     const [project] = await dbQuery(
       `SELECT p.*, c.id as client_id 
@@ -185,14 +194,67 @@ router.get('/project/:projectId', authorizePermission('projects', 'view'), async
         ]
       );
 
-      const workspaceId = result.insertId;
+      let workspaceId = result.insertId != null ? Number(result.insertId) : 0;
 
-      // Add creator as owner
-      await dbQuery(
-        `INSERT INTO pm_workspace_members (workspace_id, user_id, role)
-         VALUES (?, ?, 'owner')`,
-        [workspaceId, userId]
-      );
+      // When insertId is 0 (broken AUTO_INCREMENT on live), assign next id and bump AUTO_INCREMENT
+      if (workspaceId <= 0) {
+        const maxRetries = 5;
+        let assigned = false;
+        for (let attempt = 0; attempt < maxRetries && !assigned; attempt++) {
+          const nextRows = await dbQuery(
+            'SELECT COALESCE(MAX(id), 0) + 1 AS next_id FROM pm_workspaces WHERE id > 0'
+          );
+          const nextId = nextRows && nextRows[0] ? Number(nextRows[0].next_id) : 1;
+          try {
+            const updateResult = await dbQuery(
+              'UPDATE pm_workspaces SET id = ? WHERE id = 0 AND project_id = ? LIMIT 1',
+              [nextId, projectId]
+            );
+            const affected = updateResult && typeof updateResult.affectedRows === 'number' ? updateResult.affectedRows : 0;
+            if (affected >= 1) {
+              workspaceId = nextId;
+              assigned = true;
+              await dbQuery(
+                `INSERT INTO pm_workspace_members (workspace_id, user_id, role)
+                 VALUES (?, ?, 'owner')`,
+                [workspaceId, userId]
+              );
+              try {
+                await dbQuery(
+                  `ALTER TABLE pm_workspaces AUTO_INCREMENT = ${Number(nextId) + 1}`
+                );
+              } catch (alterErr) {
+                console.warn('Could not bump pm_workspaces AUTO_INCREMENT:', alterErr.message);
+              }
+              break;
+            }
+          } catch (err) {
+            if (err.code === 'ER_DUP_ENTRY') continue;
+            throw err;
+          }
+        }
+        if (!assigned) {
+          const fallback = await dbQuery(
+            'SELECT id FROM pm_workspaces WHERE project_id = ? ORDER BY id DESC LIMIT 1',
+            [projectId]
+          );
+          if (fallback && fallback[0]) {
+            workspaceId = Number(fallback[0].id);
+            await dbQuery(
+              `INSERT INTO pm_workspace_members (workspace_id, user_id, role)
+               VALUES (?, ?, 'owner')`,
+              [workspaceId, userId]
+            ).catch(() => {}); // ignore if already member
+          }
+        }
+      } else {
+        // Add creator as owner (when insertId was valid)
+        await dbQuery(
+          `INSERT INTO pm_workspace_members (workspace_id, user_id, role)
+           VALUES (?, ?, 'owner')`,
+          [workspaceId, userId]
+        );
+      }
 
       // Get the created workspace
       [workspace] = await dbQuery(
