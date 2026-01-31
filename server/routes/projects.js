@@ -480,17 +480,18 @@ router.post('/', authorizePermission('projects', 'create'), validateProject, asy
     // Resolve project id (fallback when insertId is 0 - hotfix for broken AUTO_INCREMENT on some hosts)
     let projectId = result.insertId != null ? Number(result.insertId) : 0;
     if (projectId <= 0) {
-      const [created] = await dbQuery(
+      const createdRow = await dbQuery(
         `SELECT id FROM projects WHERE workspace_id = ? AND title = ? AND client_id = ? ORDER BY id DESC LIMIT 1`,
         [workspaceId, title, client_id]
       );
-      if (created && created.id != null) projectId = Number(created.id);
-    }
-    if (!projectId || projectId <= 0) {
-      return res.status(500).json({
-        success: false,
-        message: 'Project was created but could not be retrieved. Please refresh the list or contact support.'
-      });
+      if (createdRow && createdRow.length > 0) {
+        projectId = Number(createdRow[0].id); // may be 0 when DB has broken AUTO_INCREMENT
+      } else {
+        return res.status(500).json({
+          success: false,
+          message: 'Project was created but could not be retrieved. Please refresh the list or contact support.'
+        });
+      }
     }
 
     // Auto-assign the creating user to this project so they appear in user_projects (Users list "Projects" count)
@@ -648,10 +649,10 @@ router.delete('/:id', authorizePermission('projects', 'delete'), async (req, res
   try {
     const projectId = req.params.id;
 
-    // Check if project exists
+    // Check if project exists (include deleted_at so we only find non-deleted rows)
     const ws = getWorkspaceFilter(req, '', 'workspace_id');
     const projectCheck = await dbQuery(
-      `SELECT id FROM projects WHERE id = ? ${ws.whereClause}`,
+      `SELECT id FROM projects WHERE id = ? AND (deleted_at IS NULL) ${ws.whereClause}`,
       [projectId, ...ws.whereParams]
     );
     if (projectCheck.length === 0) {
