@@ -120,6 +120,9 @@ router.get('/', authorizePermission('projects', 'view'), [
     whereClause += workspaceFilter.whereClause;
     whereParams.push(...workspaceFilter.whereParams);
 
+    // Exclude soft-deleted projects (deleted = hidden for user, kept in DB)
+    whereClause += ' AND (p.deleted_at IS NULL)';
+
     // Add client filter for client role users
     const clientFilter = getClientFilter(req, 'p', 'client_id');
     whereClause += clientFilter.whereClause;
@@ -248,7 +251,7 @@ router.get('/stats/overview', authorizePermission('projects', 'view'), async (re
         SUM(CASE WHEN budget IS NOT NULL THEN budget ELSE 0 END) as total_budget,
         AVG(CASE WHEN budget IS NOT NULL THEN budget ELSE NULL END) as avg_budget
       FROM projects
-      WHERE 1=1 ${ws.whereClause}
+      WHERE 1=1 AND (deleted_at IS NULL) ${ws.whereClause}
     `, ws.whereParams);
 
     const typeStats = await dbQuery(`
@@ -256,7 +259,7 @@ router.get('/stats/overview', authorizePermission('projects', 'view'), async (re
         type,
         COUNT(*) as count
       FROM projects
-      WHERE 1=1 ${ws.whereClause}
+      WHERE 1=1 AND (deleted_at IS NULL) ${ws.whereClause}
       GROUP BY type
       ORDER BY count DESC
     `, ws.whereParams);
@@ -477,16 +480,49 @@ router.post('/', authorizePermission('projects', 'create'), validateProject, asy
       ]
     );
 
-    // Resolve project id (fallback when insertId is 0 - hotfix for broken AUTO_INCREMENT on some hosts)
+    // Resolve project id; when insertId is 0 (broken AUTO_INCREMENT on live), assign next id in DB and bump AUTO_INCREMENT
     let projectId = result.insertId != null ? Number(result.insertId) : 0;
     if (projectId <= 0) {
-      const createdRow = await dbQuery(
-        `SELECT id FROM projects WHERE workspace_id = ? AND title = ? AND client_id = ? ORDER BY id DESC LIMIT 1`,
-        [workspaceId, title, client_id]
-      );
-      if (createdRow && createdRow.length > 0) {
-        projectId = Number(createdRow[0].id); // may be 0 when DB has broken AUTO_INCREMENT
-      } else {
+      const maxRetries = 5;
+      let assigned = false;
+      for (let attempt = 0; attempt < maxRetries && !assigned; attempt++) {
+        const nextRows = await dbQuery(
+          'SELECT COALESCE(MAX(id), 0) + 1 AS next_id FROM projects WHERE id > 0'
+        );
+        const nextId = nextRows && nextRows[0] ? Number(nextRows[0].next_id) : 1;
+        try {
+          const updateResult = await dbQuery(
+            'UPDATE projects SET id = ? WHERE id = 0 AND workspace_id = ? AND title = ? AND client_id = ? LIMIT 1',
+            [nextId, workspaceId, title, client_id]
+          );
+          const affected = updateResult && typeof updateResult.affectedRows === 'number' ? updateResult.affectedRows : 0;
+          if (affected >= 1) {
+            projectId = nextId;
+            assigned = true;
+            try {
+              await dbQuery(
+                `ALTER TABLE projects AUTO_INCREMENT = ${Number(nextId) + 1}`
+              );
+            } catch (alterErr) {
+              console.warn('Could not bump projects AUTO_INCREMENT:', alterErr.message);
+            }
+            break;
+          }
+        } catch (err) {
+          if (err.code === 'ER_DUP_ENTRY') continue;
+          throw err;
+        }
+      }
+      if (!assigned) {
+        const createdRow = await dbQuery(
+          `SELECT id FROM projects WHERE workspace_id = ? AND title = ? AND client_id = ? ORDER BY id DESC LIMIT 1`,
+          [workspaceId, title, client_id]
+        );
+        if (createdRow && createdRow.length > 0) {
+          projectId = Number(createdRow[0].id);
+        }
+      }
+      if (!projectId || projectId <= 0) {
         return res.status(500).json({
           success: false,
           message: 'Project was created but could not be retrieved. Please refresh the list or contact support.'
