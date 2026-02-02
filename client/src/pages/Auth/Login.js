@@ -40,14 +40,13 @@ const Login = () => {
 
   const onSubmit = async (data) => {
     setIsLoading(true);
-    
+
     try {
       const result = await login(data);
-      
+
       if (result.success) {
         toast.success('Login successful!');
       } else {
-        // Handle email verification requirement
         if (result.requiresVerification) {
           toast.error(result.error || 'Please verify your email address before logging in.', {
             duration: 6000,
@@ -62,8 +61,7 @@ const Login = () => {
       }
     } catch (error) {
       console.error('Login error:', error);
-      
-      // Handle email verification requirement from API
+
       if (error.response?.data?.requiresVerification) {
         toast.error(
           error.response.data.message || 'Please verify your email address before logging in.',
@@ -71,9 +69,9 @@ const Login = () => {
         );
       } else {
         toast.error(
-          error.response?.data?.message || 
-          'Login failed. Please check your credentials.' ||
-          'An unexpected error occurred'
+          error.response?.data?.message ||
+            'Login failed. Please check your credentials.' ||
+            'An unexpected error occurred'
         );
       }
     } finally {
@@ -81,35 +79,68 @@ const Login = () => {
     }
   };
 
+  const scrollToForm = () => {
+    const el = document.getElementById('login-form');
+    if (el) el.scrollIntoView({ behavior: 'smooth' });
+  };
+
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-primary-50 to-primary-100 py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-md w-full space-y-8">
-        {/* Header */}
-        <div className="text-center">
-          <div className="mx-auto h-16 w-16 bg-primary-600 rounded-full flex items-center justify-center">
-            <Lock className="h-8 w-8 text-white" />
-          </div>
-          <h2 className="mt-6 text-3xl font-bold text-gray-900">
-            Welcome back
-          </h2>
-          <p className="mt-2 text-sm text-gray-600">
-            Sign in to your account to continue
+    <div className="h-screen flex flex-col lg:flex-row overflow-hidden bg-white">
+      {/* Left panel: Welcome + tagline (primary theme), glass card, built-by at bottom */}
+      <div className="flex-shrink-0 lg:w-1/2 bg-primary-600 flex flex-col justify-between items-center px-6 sm:px-8 lg:px-10 py-6 lg:py-8 order-1 lg:order-1 relative">
+        <div className="absolute inset-0 bg-gradient-to-br from-primary-500/30 to-primary-700/50 pointer-events-none" aria-hidden />
+        <div className="max-w-sm w-full text-center text-white flex-1 flex flex-col justify-center relative z-10 rounded-2xl bg-white/10 backdrop-blur-md border border-white/20 shadow-xl px-6 py-8 lg:px-8 lg:py-10">
+          <h1 className="text-2xl sm:text-3xl font-bold mb-3">Good to see you again</h1>
+          <p className="text-primary-100 text-sm sm:text-base mb-4">
+            Your work deserves clarity, not chaos.
           </p>
+          <p className="text-primary-100 text-sm sm:text-base mb-6">
+            Growing with <span className="font-semibold text-white">W | Technology</span>
+          </p>
+          <ul className="text-primary-100 text-sm sm:text-base space-y-2 list-none mx-auto inline-flex flex-col items-center justify-center">
+            <li className="flex items-center justify-center gap-2 w-full">
+              <span className="text-primary-300 flex-shrink-0" aria-hidden></span>
+              <span>Simple, Secure , Built for freelancers &amp; agencies</span>
+            </li>
+            <li className="flex items-center justify-center gap-2 w-full">
+              <span className="text-primary-300 flex-shrink-0" aria-hidden></span>
+              <span></span>
+            </li>
+            <li className="flex items-center justify-center gap-2 w-full">
+              <span className="text-primary-300 flex-shrink-0" aria-hidden></span>
+              <span></span>
+            </li>
+          </ul>
         </div>
+        <p className="text-primary-200 text-xs sm:text-sm pt-4 border-t border-white/20 mt-4 flex-shrink-0 text-center w-full max-w-sm relative z-10">
+          Built with ❤️ by <span className="font-semibold text-white">W | Technology</span>
+        </p>
+      </div>
 
-        {/* Trial expired banner (after session check) */}
-        {showTrialExpiredBanner && (
-          <div className="rounded-lg bg-amber-50 border border-amber-200 py-4 px-4 text-center text-amber-800 text-sm">
-            Your free trial has ended. Please contact sales to upgrade and continue using the platform.
+      {/* Right panel: Login form — centered, glass effect */}
+      <div
+        id="login-form"
+        className="flex-1 flex flex-col min-h-0 overflow-y-auto bg-gradient-to-b from-primary-50/30 to-white order-2 lg:order-2 justify-center items-center"
+      >
+        <div className="flex flex-col w-full max-w-md mx-auto px-6 py-6 lg:py-8">
+          <div className="text-center mb-5">
+            <div className="inline-flex h-12 w-12 bg-primary-600 rounded-full items-center justify-center shadow-lg">
+              <Lock className="h-6 w-6 text-white" />
+            </div>
+            <h2 className="mt-4 text-xl font-bold text-gray-900">Sign in to your account</h2>
+            <p className="mt-1 text-sm text-gray-600">Enter your credentials below</p>
           </div>
-        )}
 
-        {/* Login Form */}
-        <div className="bg-white py-8 px-6 shadow-soft rounded-lg">
-          <form className="space-y-6" onSubmit={handleSubmit(onSubmit)}>
-            {/* Username/Email Field */}
+          {showTrialExpiredBanner && (
+            <div className="rounded-lg bg-amber-50/90 backdrop-blur-sm border border-amber-200 py-3 px-4 text-center text-amber-800 text-sm mb-4">
+              Your free trial has ended. Please contact sales to upgrade and continue using the platform.
+            </div>
+          )}
+
+          <div className="bg-white/70 backdrop-blur-xl rounded-2xl border border-white/60 shadow-xl shadow-primary-900/5 px-5 py-5">
+            <form className="space-y-4" onSubmit={handleSubmit(onSubmit)}>
             <div>
-              <label htmlFor="username" className="form-label">
+              <label htmlFor="username" className="form-label text-sm">
                 Username or Email
               </label>
               <div className="relative">
@@ -122,20 +153,19 @@ const Login = () => {
                   {...register('username', {
                     required: 'Username or email is required',
                   })}
-                  className={`form-input pl-10 ${
+                  className={`form-input pl-10 py-2 text-sm ${
                     errors.username ? 'border-danger-500' : ''
                   }`}
                   placeholder="Enter your username or email"
                 />
               </div>
               {errors.username && (
-                <p className="form-error">{errors.username.message}</p>
+                <p className="form-error text-xs mt-1">{errors.username.message}</p>
               )}
             </div>
 
-            {/* Password Field */}
             <div>
-              <label htmlFor="password" className="form-label">
+              <label htmlFor="password" className="form-label text-sm">
                 Password
               </label>
               <div className="relative">
@@ -152,7 +182,7 @@ const Login = () => {
                       message: 'Password must be at least 6 characters',
                     },
                   })}
-                  className={`form-input pl-10 pr-10 ${
+                  className={`form-input pl-10 pr-10 py-2 text-sm ${
                     errors.password ? 'border-danger-500' : ''
                   }`}
                   placeholder="Enter your password"
@@ -170,12 +200,11 @@ const Login = () => {
                 </button>
               </div>
               {errors.password && (
-                <p className="form-error">{errors.password.message}</p>
+                <p className="form-error text-xs mt-1">{errors.password.message}</p>
               )}
             </div>
 
-            {/* Remember Me & Forgot Password */}
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between text-sm">
               <div className="flex items-center">
                 <input
                   id="remember-me"
@@ -183,24 +212,20 @@ const Login = () => {
                   type="checkbox"
                   className="h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded"
                 />
-                <label htmlFor="remember-me" className="ml-2 block text-sm text-gray-900">
+                <label htmlFor="remember-me" className="ml-2 block text-gray-700">
                   Remember me
                 </label>
               </div>
-
-              <div className="text-sm">
-                <a href="#" className="font-medium text-primary-600 hover:text-primary-500">
-                  Forgot your password?
-                </a>
-              </div>
+              <a href="#" className="font-medium text-primary-600 hover:text-primary-500">
+                Forgot password?
+              </a>
             </div>
 
-            {/* Submit Button */}
             <div>
               <button
                 type="submit"
                 disabled={isLoading}
-                className="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-primary-600 hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
+                className="w-full flex justify-center py-2.5 px-4 border border-transparent text-sm font-medium rounded-lg text-white bg-primary-600 hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
               >
                 {isLoading ? (
                   <div className="flex items-center">
@@ -213,37 +238,25 @@ const Login = () => {
               </button>
             </div>
           </form>
+          </div>
 
-          {/* Demo Credentials */}
-          {/* <div className="mt-6 p-4 bg-gray-50 rounded-md">
-            <h3 className="text-sm font-medium text-gray-900 mb-2">Demo Credentials:</h3>
-            <div className="text-xs text-gray-600 space-y-1">
-              <p><strong>Username:</strong> admin</p>
-              <p><strong>Password:</strong> password</p>
-            </div>
-          </div> */}
-        </div>
-
-        {/* Footer */}
-        <div className="text-center space-y-2">
-          <p className="text-sm text-gray-600">
-            Don't have an account?{' '}
-            <Link
-              to="/register"
-              className="font-medium text-primary-600 hover:text-primary-500"
-            >
-              Create an account
-            </Link>
-          </p>
-          <p className="text-sm text-gray-600">
-            Need to verify your email?{' '}
-            <Link
-              to="/resend-verification"
-              className="font-medium text-primary-600 hover:text-primary-500"
-            >
-              Resend verification
-            </Link>
-          </p>
+          <div className="mt-5 text-center space-y-1 text-sm">
+            <p className="text-gray-600">
+              Don&apos;t have an account?{' '}
+              <Link to="/register" className="font-medium text-primary-600 hover:text-primary-500">
+                Create an account
+              </Link>
+            </p>
+            <p className="text-gray-600">
+              Need to verify your email?{' '}
+              <Link
+                to="/resend-verification"
+                className="font-medium text-primary-600 hover:text-primary-500"
+              >
+                Resend verification
+              </Link>
+            </p>
+          </div>
         </div>
       </div>
     </div>

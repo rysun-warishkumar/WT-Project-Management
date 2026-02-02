@@ -339,15 +339,15 @@ router.post('/', authorizePermission('quotations', 'create'), validateQuotation,
       items
     } = req.body;
 
-    const workspaceId = req.workspaceId || req.workspaceFilter?.value;
+    let workspaceId = req.workspaceId || req.workspaceFilter?.value;
     if (!workspaceId && !req.isSuperAdmin) {
       return res.status(403).json({ success: false, message: 'Workspace context required' });
     }
 
-    // Check if client exists and is not soft-deleted
+    // Check if client exists and is not soft-deleted (select workspace_id for super admin)
     const wsCli = getWorkspaceFilter(req, '', 'workspace_id');
     const clientCheck = await dbQuery(
-      `SELECT id FROM clients WHERE id = ? AND deleted_at IS NULL ${wsCli.whereClause}`,
+      `SELECT id, workspace_id FROM clients WHERE id = ? AND deleted_at IS NULL ${wsCli.whereClause}`,
       [client_id, ...wsCli.whereParams]
     );
     if (clientCheck.length === 0) {
@@ -355,6 +355,11 @@ router.post('/', authorizePermission('quotations', 'create'), validateQuotation,
         success: false,
         message: 'Client not found'
       });
+    }
+
+    // Super admin: use client's workspace when no workspace context is set
+    if (!workspaceId && req.isSuperAdmin && clientCheck[0].workspace_id != null) {
+      workspaceId = clientCheck[0].workspace_id;
     }
 
     // Check if project exists and is not soft-deleted (if provided)
@@ -385,6 +390,13 @@ router.post('/', authorizePermission('quotations', 'create'), validateQuotation,
       finalSubtotal = calculated.subtotal;
       finalTaxAmount = (finalSubtotal * (tax_rate || 0)) / 100;
       finalTotalAmount = finalSubtotal + finalTaxAmount;
+    }
+
+    if (workspaceId == null) {
+      return res.status(400).json({
+        success: false,
+        message: 'Could not determine workspace for this quotation. The selected client may not belong to a workspace.'
+      });
     }
 
     // Insert quotation
@@ -678,7 +690,17 @@ router.delete('/:id', authorizePermission('quotations', 'delete'), async (req, r
 router.post('/:id/convert-to-invoice', authorizePermission('invoices', 'create'), async (req, res) => {
   try {
     const quotationId = req.params.id;
-    const { invoice_date, due_date, payment_terms } = req.body;
+    const { invoice_date: bodyInvoiceDate, due_date: bodyDueDate, payment_terms } = req.body || {};
+
+    // Default invoice_date to today, due_date to today + 30 days if not provided (NOT NULL columns)
+    const today = new Date();
+    const toDateStr = (d) => d.toISOString().split('T')[0];
+    const invoiceDate = bodyInvoiceDate && /^\d{4}-\d{2}-\d{2}$/.test(String(bodyInvoiceDate).trim())
+      ? String(bodyInvoiceDate).trim()
+      : toDateStr(today);
+    const dueDate = bodyDueDate && /^\d{4}-\d{2}-\d{2}$/.test(String(bodyDueDate).trim())
+      ? String(bodyDueDate).trim()
+      : (() => { const d = new Date(today); d.setDate(d.getDate() + 30); return toDateStr(d); })();
 
     // Check if quotation exists and is accepted
     const ws = getWorkspaceFilter(req, '', 'workspace_id');
@@ -695,26 +717,36 @@ router.post('/:id/convert-to-invoice', authorizePermission('invoices', 'create')
 
     const quotation = quotationCheck[0];
 
-    // Generate invoice number
+    // Generate invoice number (global uniqueness: invoice_number is unique across all workspaces)
     const year = new Date().getFullYear();
-    const wsi = getWorkspaceFilter(req, '', 'workspace_id');
-    const invoiceCount = await dbQuery(
-      `SELECT COUNT(*) as count FROM invoices WHERE YEAR(created_at) = ? ${wsi.whereClause}`,
-      [year, ...wsi.whereParams]
+    const invoiceCountResult = await dbQuery(
+      'SELECT COUNT(*) as count FROM invoices WHERE YEAR(created_at) = ?',
+      [year]
     );
-    const invoiceNumber = `INV-${year}-${(invoiceCount[0].count + 1).toString().padStart(4, '0')}`;
+    const nextSeq = (invoiceCountResult[0].count || 0) + 1;
+    const invoiceNumber = `INV-${year}-${nextSeq.toString().padStart(4, '0')}`;
 
-    // Create invoice
-    const workspaceId = req.workspaceId || req.workspaceFilter?.value;
+    // Create invoice (ensure no undefined bind params - mysql2 requires null for SQL NULL)
+    const workspaceId = req.workspaceId ?? req.workspaceFilter?.value ?? null;
     const invoiceResult = await dbQuery(
       `INSERT INTO invoices (
         invoice_number, quotation_id, client_id, project_id, invoice_date, due_date,
         status, subtotal, tax_rate, tax_amount, total_amount, currency, created_by, workspace_id
       ) VALUES (?, ?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?)`,
       [
-        invoiceNumber, quotationId, quotation.client_id, quotation.project_id,
-        invoice_date, due_date, quotation.subtotal, quotation.tax_rate,
-        quotation.tax_amount, quotation.total_amount, quotation.currency, req.user.id, workspaceId || null
+        invoiceNumber ?? null,
+        quotationId ?? null,
+        quotation.client_id ?? null,
+        quotation.project_id ?? null,
+        invoiceDate,
+        dueDate,
+        quotation.subtotal ?? null,
+        quotation.tax_rate ?? null,
+        quotation.tax_amount ?? null,
+        quotation.total_amount ?? null,
+        quotation.currency ?? null,
+        req.user?.id ?? null,
+        workspaceId
       ]
     );
 
@@ -732,12 +764,12 @@ router.post('/:id/convert-to-invoice', authorizePermission('invoices', 'create')
           invoice_id, item_name, description, quantity, unit_price, total_price
         ) VALUES (?, ?, ?, ?, ?, ?)`,
         [
-          invoiceId,
-          item.item_name,
-          item.description,
-          item.quantity,
-          item.unit_price,
-          item.total_price
+          invoiceId ?? null,
+          item.item_name ?? null,
+          item.description ?? null,
+          item.quantity ?? null,
+          item.unit_price ?? null,
+          item.total_price ?? null
         ]
       );
     }
@@ -756,6 +788,12 @@ router.post('/:id/convert-to-invoice', authorizePermission('invoices', 'create')
     });
   } catch (error) {
     console.error('Error converting quotation to invoice:', error);
+    if (error.code === 'ER_DUP_ENTRY' && error.sqlMessage && error.sqlMessage.includes('invoice_number')) {
+      return res.status(409).json({
+        success: false,
+        message: 'An invoice with that number already exists. Please try again.'
+      });
+    }
     res.status(500).json({
       success: false,
       message: 'Failed to convert quotation to invoice'

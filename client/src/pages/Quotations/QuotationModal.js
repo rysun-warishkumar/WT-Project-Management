@@ -5,24 +5,17 @@ import { X, Plus, Trash2, Calculator } from 'lucide-react';
 import { quotationsAPI, clientsAPI, projectsAPI } from '../../services/api';
 import toast from 'react-hot-toast';
 
+// Normalize API date (Date, ISO string, or YYYY-MM-DD) to YYYY-MM-DD for input type="date"
+const toDateOnly = (value) => {
+  if (value == null || value === '') return '';
+  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value.trim())) return value.trim();
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toISOString().split('T')[0];
+};
+
 const QuotationModal = ({ isOpen, onClose, onSuccess, quotation }) => {
   const [isSubmitting, setIsSubmitting] = useState(false);
-
-  // Fetch clients and projects for dropdowns
-  const { data: clientsData } = useQuery(
-    ['clients', 'dropdown'],
-    () => clientsAPI.getAll({ limit: 1000 }),
-    { enabled: isOpen }
-  );
-
-  const { data: projectsData } = useQuery(
-    ['projects', 'dropdown'],
-    () => projectsAPI.getAll({ limit: 1000 }),
-    { enabled: isOpen }
-  );
-
-  const clients = clientsData?.data?.data?.clients || [];
-  const projects = projectsData?.data?.data?.projects || [];
 
   const {
     register,
@@ -30,6 +23,7 @@ const QuotationModal = ({ isOpen, onClose, onSuccess, quotation }) => {
     control,
     watch,
     setValue,
+    getValues,
     reset,
     formState: { errors },
   } = useForm({
@@ -51,31 +45,70 @@ const QuotationModal = ({ isOpen, onClose, onSuccess, quotation }) => {
     }
   });
 
+  // Watch selected client so we can fetch projects for that client
+  const selectedClientId = watch('client_id');
+
+  // Fetch clients for dropdown
+  const { data: clientsData } = useQuery(
+    ['clients', 'dropdown'],
+    () => clientsAPI.getAll({ limit: 1000 }),
+    { enabled: isOpen }
+  );
+
+  const clients = clientsData?.data?.data?.clients || [];
+
+  // Fetch projects only for the selected client
+  const { data: projectsData } = useQuery(
+    ['projects', 'dropdown', selectedClientId],
+    () => projectsAPI.getAll({ limit: 1000, client_id: selectedClientId }),
+    { enabled: isOpen && !!selectedClientId }
+  );
+
+  const projects = projectsData?.data?.data?.projects || [];
+
   const { fields, append, remove } = useFieldArray({
     control,
     name: 'items'
   });
 
-  // Watch values for calculations
-  const watchedItems = watch('items');
-  const watchedTaxRate = watch('tax_rate');
+  // Single source of truth: recalculate subtotal, tax (0 when empty), and total
+  const recalculateTotals = () => {
+    const items = getValues('items') || [];
+    const rawTaxRate = getValues('tax_rate');
+    const taxRate = (rawTaxRate !== '' && rawTaxRate !== undefined && rawTaxRate !== null && !Number.isNaN(Number(rawTaxRate)))
+      ? parseFloat(rawTaxRate)
+      : 0;
 
-  // Calculate totals when items or tax rate changes
-  useEffect(() => {
-    const subtotal = watchedItems.reduce((sum, item) => {
-      const quantity = parseFloat(item.quantity) || 0;
-      const unitPrice = parseFloat(item.unit_price) || 0;
-      return sum + (quantity * unitPrice);
+    const subtotal = items.reduce((sum, item) => {
+      const quantity = parseFloat(item?.quantity) || 0;
+      const unitPrice = parseFloat(item?.unit_price) || 0;
+      return sum + quantity * unitPrice;
     }, 0);
 
-    const taxRate = parseFloat(watchedTaxRate) || 0;
     const taxAmount = (subtotal * taxRate) / 100;
     const totalAmount = subtotal + taxAmount;
 
     setValue('subtotal', subtotal);
     setValue('tax_amount', taxAmount);
     setValue('total_amount', totalAmount);
+  };
+
+  // Watch values for calculations (live updates as user types)
+  const watchedItems = watch('items');
+  const watchedTaxRate = watch('tax_rate');
+
+  useEffect(() => {
+    recalculateTotals();
   }, [watchedItems, watchedTaxRate, setValue]);
+
+  // On blur of Unit Price or Quantity, recalculate so totals update when user leaves the field (tax = 0 if not set)
+  const withBlurRecalc = (registered) => ({
+    ...registered,
+    onBlur: (e) => {
+      registered.onBlur(e);
+      recalculateTotals();
+    }
+  });
 
   // Reset form when quotation prop changes
   useEffect(() => {
@@ -84,8 +117,8 @@ const QuotationModal = ({ isOpen, onClose, onSuccess, quotation }) => {
         quote_number: quotation.quote_number || '',
         client_id: quotation.client_id ? String(quotation.client_id) : '',
         project_id: quotation.project_id ? String(quotation.project_id) : '',
-        quote_date: quotation.quote_date || new Date().toISOString().split('T')[0],
-        valid_till_date: quotation.valid_till_date || '',
+        quote_date: toDateOnly(quotation.quote_date) || new Date().toISOString().split('T')[0],
+        valid_till_date: toDateOnly(quotation.valid_till_date) || '',
         status: quotation.status || 'draft',
         subtotal: quotation.subtotal || 0,
         tax_rate: quotation.tax_rate || 0,
@@ -114,7 +147,19 @@ const QuotationModal = ({ isOpen, onClose, onSuccess, quotation }) => {
         items: [{ item_name: '', description: '', quantity: 1, unit_price: 0, total_price: 0 }]
       });
     }
-  }, [quotation, reset, projects]);
+  }, [quotation, reset]);
+
+  // Client select: clear project when client changes
+  const clientIdField = (() => {
+    const { onChange, ...rest } = register('client_id', { required: 'Client is required' });
+    return {
+      ...rest,
+      onChange: (e) => {
+        onChange(e);
+        setValue('project_id', '');
+      },
+    };
+  })();
 
   // Create/Update mutation
   const mutation = useMutation(
@@ -214,7 +259,7 @@ const QuotationModal = ({ isOpen, onClose, onSuccess, quotation }) => {
             <div>
               <label className="form-label">Client *</label>
               <select
-                {...register('client_id', { required: 'Client is required' })}
+                {...clientIdField}
                 className={`form-select ${errors.client_id ? 'border-red-500' : ''}`}
               >
                 <option value="">Select Client</option>
@@ -234,8 +279,11 @@ const QuotationModal = ({ isOpen, onClose, onSuccess, quotation }) => {
               <select
                 {...register('project_id')}
                 className="form-select"
+                disabled={!selectedClientId}
               >
-                <option value="">Select Project (Optional)</option>
+                <option value="">
+                  {selectedClientId ? 'Select Project (Optional)' : 'Select client first'}
+                </option>
                 {projects.map((project) => (
                   <option key={project.id} value={project.id}>
                     {project.title}
@@ -343,10 +391,10 @@ const QuotationModal = ({ isOpen, onClose, onSuccess, quotation }) => {
                       <input
                         type="number"
                         min="1"
-                        {...register(`items.${index}.quantity`, { 
+                        {...withBlurRecalc(register(`items.${index}.quantity`, { 
                           required: 'Quantity is required',
                           min: { value: 1, message: 'Quantity must be at least 1' }
-                        })}
+                        }))}
                         className={`form-input ${errors.items?.[index]?.quantity ? 'border-red-500' : ''}`}
                       />
                       {errors.items?.[index]?.quantity && (
@@ -360,10 +408,10 @@ const QuotationModal = ({ isOpen, onClose, onSuccess, quotation }) => {
                         type="number"
                         step="0.01"
                         min="0"
-                        {...register(`items.${index}.unit_price`, { 
+                        {...withBlurRecalc(register(`items.${index}.unit_price`, { 
                           required: 'Unit price is required',
                           min: { value: 0, message: 'Unit price must be positive' }
-                        })}
+                        }))}
                         className={`form-input ${errors.items?.[index]?.unit_price ? 'border-red-500' : ''}`}
                         placeholder="0.00"
                       />

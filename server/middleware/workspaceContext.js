@@ -5,6 +5,7 @@
 
 const { query } = require('../config/database');
 const { isWorkspaceAccessAllowed } = require('../utils/workspaceUtils');
+const { getOrCreateSuperAdminWorkspace } = require('../utils/superAdminWorkspace');
 
 /**
  * Middleware to ensure workspace context is set
@@ -21,10 +22,19 @@ const workspaceContext = async (req, res, next) => {
       });
     }
 
-    // Super admin bypasses workspace filtering
+    // Super admin: get or create "Super admin workspace" so create operations have a workspace_id
     if (user.is_super_admin || user.isSuperAdmin) {
-      req.workspaceFilter = null; // No filter for super admin
       req.isSuperAdmin = true;
+      try {
+        const workspaceId = await getOrCreateSuperAdminWorkspace(user.id);
+        req.workspaceId = workspaceId;
+        req.workspaceFilter = { column: 'workspace_id', value: workspaceId };
+        // No filter for list/read (super admin sees all); workspaceId is for create/update
+      } catch (err) {
+        console.error('Super admin workspace get/create error:', err);
+        req.workspaceFilter = null;
+        req.workspaceId = null;
+      }
       return next();
     }
 

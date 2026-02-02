@@ -16,17 +16,23 @@ import {
   Users,
   FolderOpen,
   RefreshCw,
+  Building2,
+  ArrowLeft,
 } from 'lucide-react';
 import { clientsAPI } from '../../services/api';
 import toast from 'react-hot-toast';
 import ClientModal from './ClientModal';
 import DeleteConfirmModal from '../../components/Common/DeleteConfirmModal';
 import { usePermissions } from '../../hooks/usePermissions';
+import { useAuth } from '../../contexts/AuthContext';
 
 const Clients = () => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const { user } = useAuth();
   const { hasPermission } = usePermissions();
+  const isSuperAdmin = Boolean(user?.is_super_admin || user?.isSuperAdmin);
+
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [businessTypeFilter, setBusinessTypeFilter] = useState('');
@@ -36,26 +42,28 @@ const Clients = () => {
   const [deleteClient, setDeleteClient] = useState(null);
   const [showFilters, setShowFilters] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
-  
-  // Permission checks
+  // Super admin: 'my_clients' = Super admin workspace only (default), 'other_workspaces' = clients from other workspaces
+  const [viewMode, setViewMode] = useState('my_clients');
+
   const canCreate = hasPermission('clients', 'create');
   const canEdit = hasPermission('clients', 'edit');
   const canDelete = hasPermission('clients', 'delete');
 
-  // Fetch clients data
   const {
     data: clientsData,
     isLoading,
     error,
   } = useQuery(
-    ['clients', currentPage, searchTerm, statusFilter, businessTypeFilter, refreshKey],
-         () => clientsAPI.getAll({
-       page: currentPage,
-       limit: 10,
-       search: searchTerm,
-       status: statusFilter,
-       business_type: businessTypeFilter,
-     }),
+    ['clients', currentPage, searchTerm, statusFilter, businessTypeFilter, refreshKey, viewMode],
+    () =>
+      clientsAPI.getAll({
+        page: currentPage,
+        limit: 10,
+        search: searchTerm,
+        status: statusFilter,
+        business_type: businessTypeFilter,
+        ...(viewMode === 'other_workspaces' && isSuperAdmin ? { view: 'all_workspaces' } : {}),
+      }),
     {
       keepPreviousData: true,
       staleTime: 0, // Always consider data stale
@@ -147,6 +155,7 @@ const Clients = () => {
   const clients = clientsData?.data?.data?.clients || [];
   const pagination = clientsData?.data?.data?.pagination || {};
   const businessTypes = clientsData?.data?.data?.filters?.businessTypes || [];
+  const isOtherWorkspacesView = viewMode === 'other_workspaces' && isSuperAdmin;
 
 
 
@@ -163,6 +172,31 @@ const Clients = () => {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2 sm:space-x-3">
+          {isSuperAdmin && (
+            isOtherWorkspacesView ? (
+              <button
+                onClick={() => {
+                  setViewMode('my_clients');
+                  setCurrentPage(1);
+                }}
+                className="btn btn-outline flex-1 sm:flex-none justify-center"
+              >
+                <ArrowLeft className="h-4 w-4 mr-2" />
+                My clients
+              </button>
+            ) : (
+              <button
+                onClick={() => {
+                  setViewMode('other_workspaces');
+                  setCurrentPage(1);
+                }}
+                className="btn btn-outline flex-1 sm:flex-none justify-center"
+              >
+                <Building2 className="h-4 w-4 mr-2" />
+                Clients of another workspace
+              </button>
+            )
+          )}
           <button
             onClick={handleRefresh}
             className="btn btn-outline flex-1 sm:flex-none justify-center"
@@ -171,7 +205,7 @@ const Clients = () => {
             <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
             Refresh
           </button>
-          {canCreate && (
+          {canCreate && !isOtherWorkspacesView && (
             <button
               onClick={() => setIsModalOpen(true)}
               className="btn btn-primary flex-1 sm:flex-none justify-center"
@@ -301,6 +335,11 @@ const Clients = () => {
               <table className="min-w-full divide-y divide-gray-200">
                 <thead className="bg-gray-50">
                   <tr>
+                    {isOtherWorkspacesView && (
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Workspace
+                      </th>
+                    )}
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Client
                     </th>
@@ -327,6 +366,11 @@ const Clients = () => {
                 <tbody className="bg-white divide-y divide-gray-200">
                   {clients.map((client) => (
                     <tr key={client.id} className="hover:bg-gray-50">
+                      {isOtherWorkspacesView && (
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                          {client.workspace_name || '—'}
+                        </td>
+                      )}
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="flex items-center">
                           <div className="flex-shrink-0 h-10 w-10">

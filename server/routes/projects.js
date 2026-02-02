@@ -91,6 +91,8 @@ router.get('/', authorizePermission('projects', 'view'), [
     }
     return true;
   }),
+  validatorQuery('view').optional().isIn(['all_workspaces']).withMessage('Invalid view'),
+  validatorQuery('workspace_id').optional().isInt({ min: 1 }).withMessage('workspace_id must be a positive integer')
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
@@ -110,20 +112,88 @@ router.get('/', authorizePermission('projects', 'view'), [
     const status = req.query.status || '';
     const type = req.query.type || '';
     const clientId = req.query.client_id || '';
+    const viewAllWorkspaces = req.query.view === 'all_workspaces' && req.isSuperAdmin;
+    const filterWorkspaceId = req.query.workspace_id ? parseInt(req.query.workspace_id, 10) : null;
 
-    // Build WHERE clause
+    // Super admin: "Projects of another workspace" — list projects from other workspaces with workspace name
+    if (viewAllWorkspaces && req.workspaceId) {
+      let whereClause = 'WHERE (p.deleted_at IS NULL) AND p.workspace_id != ?';
+      const whereParams = [req.workspaceId];
+      if (filterWorkspaceId) {
+        whereClause += ' AND p.workspace_id = ?';
+        whereParams.push(filterWorkspaceId);
+      }
+      if (search) {
+        whereClause += ' AND (p.title LIKE ? OR p.description LIKE ? OR c.full_name LIKE ? OR c.company_name LIKE ?)';
+        const searchTerm = `%${search}%`;
+        whereParams.push(searchTerm, searchTerm, searchTerm, searchTerm);
+      }
+      if (status) {
+        whereClause += ' AND p.status = ?';
+        whereParams.push(status);
+      }
+      if (type) {
+        whereClause += ' AND p.type = ?';
+        whereParams.push(type);
+      }
+      if (clientId) {
+        whereClause += ' AND p.client_id = ?';
+        whereParams.push(clientId);
+      }
+
+      const projects = await dbQuery(
+        `SELECT 
+          p.*,
+          w.name AS workspace_name,
+          c.full_name as client_name,
+          c.company_name as client_company,
+          c.email as client_email,
+          COALESCE(i.invoice_count, 0) as invoice_count,
+          COALESCE(i.total_billed, 0) as total_billed,
+          COALESCE(i.total_paid, 0) as total_paid
+         FROM projects p
+         LEFT JOIN workspaces w ON p.workspace_id = w.id AND (COALESCE(w.active, 1) = 1)
+         LEFT JOIN clients c ON p.client_id = c.id
+         LEFT JOIN (
+           SELECT project_id, COUNT(*) as invoice_count,
+             SUM(total_amount) as total_billed,
+             SUM(CASE WHEN status = 'paid' THEN total_amount ELSE 0 END) as total_paid
+           FROM invoices WHERE project_id IS NOT NULL GROUP BY project_id
+         ) i ON p.id = i.project_id
+         ${whereClause}
+         ORDER BY p.created_at DESC
+         LIMIT ? OFFSET ?`,
+        [...whereParams, limit, offset]
+      );
+      const countResult = await dbQuery(
+        `SELECT COUNT(*) as total FROM projects p
+         LEFT JOIN clients c ON p.client_id = c.id
+         ${whereClause}`,
+        whereParams
+      );
+      const total = countResult[0].total;
+      res.set({ 'Cache-Control': 'no-cache, no-store, must-revalidate', 'Pragma': 'no-cache', 'Expires': '0' });
+      return res.json({
+        success: true,
+        data: {
+          projects,
+          pagination: { page, limit, total, totalPages: Math.ceil(total / limit), hasNext: page < Math.ceil(total / limit), hasPrev: page > 1 },
+          filters: { types: [], statuses: [] },
+          view: 'all_workspaces'
+        }
+      });
+    }
+
+    // Build WHERE clause (default: workspace-filtered)
     let whereClause = 'WHERE 1=1';
     const whereParams = [];
 
-    // Add workspace filter (primary)
     const workspaceFilter = getWorkspaceFilter(req, 'p', 'workspace_id');
     whereClause += workspaceFilter.whereClause;
     whereParams.push(...workspaceFilter.whereParams);
 
-    // Exclude soft-deleted projects (deleted = hidden for user, kept in DB)
     whereClause += ' AND (p.deleted_at IS NULL)';
 
-    // Add client filter for client role users
     const clientFilter = getClientFilter(req, 'p', 'client_id');
     whereClause += clientFilter.whereClause;
     whereParams.push(...clientFilter.whereParams);
@@ -144,8 +214,6 @@ router.get('/', authorizePermission('projects', 'view'), [
       whereParams.push(type);
     }
 
-    // Only allow filtering by client_id if user is not a client role
-    // (client role users are already filtered above)
     if (clientId && req.user.role !== 'client') {
       whereClause += ' AND p.client_id = ?';
       whereParams.push(clientId);

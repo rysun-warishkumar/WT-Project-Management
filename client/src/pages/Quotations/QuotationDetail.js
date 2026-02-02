@@ -156,7 +156,7 @@ const QuotationDetail = () => {
             className="btn btn-outline btn-sm"
           >
             <ArrowLeft className="h-4 w-4 mr-2" />
-            Back to Quotations
+            
           </button>
           <div>
             <h1 className="text-2xl font-bold text-gray-900">{quotation.quote_number}</h1>

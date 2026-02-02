@@ -49,8 +49,10 @@ const FileModal = ({ isOpen, onClose, onSuccess, file }) => {
     ? projects.filter(p => p.client_id === parseInt(watchedClientId))
     : projects;
 
-  // Reset form when file prop changes
+  // Reset form and clear file whenever modal opens (so Upload File always shows a clean form)
   useEffect(() => {
+    if (!isOpen) return;
+    setSelectedFile(null);
     if (file) {
       reset({
         client_id: file.client_id ? String(file.client_id) : '',
@@ -58,7 +60,6 @@ const FileModal = ({ isOpen, onClose, onSuccess, file }) => {
         description: file.description || '',
         tags: file.tags ? (typeof file.tags === 'string' ? file.tags : JSON.stringify(file.tags)) : '',
       });
-      setSelectedFile(null);
     } else {
       reset({
         client_id: '',
@@ -66,9 +67,8 @@ const FileModal = ({ isOpen, onClose, onSuccess, file }) => {
         description: '',
         tags: '',
       });
-      setSelectedFile(null);
     }
-  }, [file, reset]);
+  }, [isOpen, file, reset]);
 
   // Handle file selection
   const handleFileChange = (e) => {

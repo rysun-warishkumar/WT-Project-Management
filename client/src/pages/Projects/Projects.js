@@ -12,6 +12,8 @@ import {
   RefreshCw,
   ExternalLink,
   Kanban,
+  Building2,
+  ArrowLeft,
 } from 'lucide-react';
 import { projectsAPI, pmAPI } from '../../services/api';
 import toast from 'react-hot-toast';
@@ -19,9 +21,13 @@ import ProjectModal from './ProjectModal';
 import DeleteConfirmModal from '../../components/Common/DeleteConfirmModal';
 import ProjectChatModal from './ProjectChatModal';
 import ProjectChatButton from './ProjectChatButton';
+import { useAuth } from '../../contexts/AuthContext';
 
 const Projects = () => {
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const isSuperAdmin = Boolean(user?.is_super_admin || user?.isSuperAdmin);
+
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [typeFilter, setTypeFilter] = useState('');
@@ -33,22 +39,24 @@ const Projects = () => {
   const [showFilters, setShowFilters] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const [chatProject, setChatProject] = useState(null);
+  const [viewMode, setViewMode] = useState('my_projects');
 
-  // Fetch projects data
   const {
     data: projectsData,
     isLoading,
     error,
   } = useQuery(
-    ['projects', currentPage, searchTerm, statusFilter, typeFilter, clientFilter, refreshKey],
-    () => projectsAPI.getAll({
-      page: currentPage,
-      limit: 10,
-      search: searchTerm,
-      status: statusFilter,
-      type: typeFilter,
-      client_id: clientFilter,
-    }),
+    ['projects', currentPage, searchTerm, statusFilter, typeFilter, clientFilter, refreshKey, viewMode],
+    () =>
+      projectsAPI.getAll({
+        page: currentPage,
+        limit: 10,
+        search: searchTerm,
+        status: statusFilter,
+        type: typeFilter,
+        client_id: clientFilter,
+        ...(viewMode === 'other_workspaces' && isSuperAdmin ? { view: 'all_workspaces' } : {}),
+      }),
     {
       keepPreviousData: true,
       staleTime: 0,
@@ -153,6 +161,8 @@ const Projects = () => {
 
   const projects = projectsData?.data?.data?.projects || [];
   const pagination = projectsData?.data?.data?.pagination || {};
+  const isOtherWorkspacesView = viewMode === 'other_workspaces' && isSuperAdmin;
+
   return (
     <div className="space-y-6">
       {/* Page Header */}
@@ -164,6 +174,30 @@ const Projects = () => {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2 sm:space-x-3">
+          {isSuperAdmin &&
+            (isOtherWorkspacesView ? (
+              <button
+                onClick={() => {
+                  setViewMode('my_projects');
+                  setCurrentPage(1);
+                }}
+                className="btn btn-outline flex-1 sm:flex-none justify-center"
+              >
+                <ArrowLeft className="h-4 w-4 mr-2" />
+                My projects
+              </button>
+            ) : (
+              <button
+                onClick={() => {
+                  setViewMode('other_workspaces');
+                  setCurrentPage(1);
+                }}
+                className="btn btn-outline flex-1 sm:flex-none justify-center"
+              >
+                <Building2 className="h-4 w-4 mr-2" />
+                Projects of another workspace
+              </button>
+            ))}
           <button
             onClick={handleRefresh}
             className="btn btn-outline flex-1 sm:flex-none justify-center"
@@ -172,13 +206,15 @@ const Projects = () => {
             <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
             Refresh
           </button>
-          <button
-            onClick={() => setIsModalOpen(true)}
-            className="btn btn-primary flex-1 sm:flex-none justify-center"
-          >
-            <Plus className="h-4 w-4 mr-2" />
-            Add Project
-          </button>
+          {!isOtherWorkspacesView && (
+            <button
+              onClick={() => setIsModalOpen(true)}
+              className="btn btn-primary flex-1 sm:flex-none justify-center"
+            >
+              <Plus className="h-4 w-4 mr-2" />
+              Add Project
+            </button>
+          )}
         </div>
       </div>
 
@@ -340,6 +376,11 @@ const Projects = () => {
                 <tbody className="bg-white divide-y divide-gray-200">
                   {projects.map((project) => (
                     <tr key={project.id} className="hover:bg-gray-50">
+                      {isOtherWorkspacesView && (
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                          {project.workspace_name || '—'}
+                        </td>
+                      )}
                       <td
                         className="px-6 py-4 whitespace-nowrap cursor-pointer"
                         onClick={() => navigate(`/projects/${project.id}`)}

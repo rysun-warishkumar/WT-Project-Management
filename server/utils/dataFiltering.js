@@ -13,15 +13,24 @@
  */
 const addWorkspaceFilter = (req, tableAlias = '', workspaceIdColumn = 'workspace_id') => {
   const user = req.user;
-  
-  // Super admin sees all data (no filter)
+
+  // Super admin: by default filter by their "Super admin workspace" so they see only their own data.
+  // "Other workspace" clients/projects are shown only when caller uses view=all_workspaces (separate path).
   if (user && (user.is_super_admin || user.isSuperAdmin)) {
+    const workspaceId = req.workspaceId || req.workspaceFilter?.value;
+    if (workspaceId) {
+      const column = tableAlias ? `${tableAlias}.${workspaceIdColumn}` : workspaceIdColumn;
+      return {
+        whereClause: ` AND ${column} = ?`,
+        whereParams: [workspaceId]
+      };
+    }
     return { whereClause: '', whereParams: [] };
   }
-  
+
   // Get workspace ID from request context or user
   const workspaceId = req.workspaceId || req.workspaceFilter?.value || user.workspace_id || user.workspaceId;
-  
+
   if (workspaceId) {
     const column = tableAlias ? `${tableAlias}.${workspaceIdColumn}` : workspaceIdColumn;
     return {
@@ -43,7 +52,7 @@ const addWorkspaceFilter = (req, tableAlias = '', workspaceIdColumn = 'workspace
  */
 const addClientFilter = (req, tableAlias = '', clientIdColumn = 'client_id') => {
   const user = req.user;
-  
+
   // If user is a client role and has a client_id, filter by it (legacy support)
   if (user && user.role === 'client' && user.client_id) {
     const column = tableAlias ? `${tableAlias}.${clientIdColumn}` : clientIdColumn;
@@ -64,18 +73,12 @@ const addClientFilter = (req, tableAlias = '', clientIdColumn = 'client_id') => 
  */
 const canAccessWorkspaceData = (req, workspaceId) => {
   const user = req.user;
-  
-  // Super admin can access all workspaces
-  if (user && (user.is_super_admin || user.isSuperAdmin)) {
-    return true;
-  }
-  
-  // Regular users can only access their own workspace
+  if (!user) return false;
+  if (user.is_super_admin || user.isSuperAdmin) return true;
   const userWorkspaceId = req.workspaceId || req.workspaceFilter?.value || user.workspace_id || user.workspaceId;
   if (userWorkspaceId) {
     return parseInt(userWorkspaceId) === parseInt(workspaceId);
   }
-  
   return false;
 };
 

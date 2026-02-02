@@ -98,25 +98,16 @@ router.get('/financial', authorizePermission('reports', 'view'), validateReportP
 
     // Get revenue by client
     // Build separate WHERE clause for this query
-    // Filter only on client's workspace_id (invoices belong to clients, so this is sufficient)
+    // Apply workspace filter for everyone including super admin (show only their workspace)
     let revenueByClientWhere = 'WHERE 1=1';
     const revenueByClientParams = [];
-    
-    // Apply workspace filter to clients table only (qualified with table alias)
-    // Ensure workspace_id is always qualified to avoid ambiguity in JOIN queries
-    const user = req.user;
-    const isSuperAdmin = user && (user.is_super_admin === true || user.is_super_admin === 1 || user.isSuperAdmin === true);
-    
-    if (!isSuperAdmin) {
-      const workspaceId = req.workspaceId || req.workspaceFilter?.value || user?.workspace_id || user?.workspaceId;
-      if (workspaceId) {
-        revenueByClientWhere += ' AND c.workspace_id = ?';
-        revenueByClientParams.push(workspaceId);
-      } else {
-        revenueByClientWhere += ' AND 1=0'; // No workspace = no results
-      }
+    const workspaceIdRevenue = req.workspaceId || req.workspaceFilter?.value || req.user?.workspace_id || req.user?.workspaceId;
+    if (workspaceIdRevenue) {
+      revenueByClientWhere += ' AND c.workspace_id = ?';
+      revenueByClientParams.push(workspaceIdRevenue);
+    } else {
+      revenueByClientWhere += ' AND 1=0';
     }
-    // Super admin: no workspace filter needed
     
     if (start_date) {
       revenueByClientWhere += ' AND i.invoice_date >= ?';
@@ -225,20 +216,14 @@ router.get('/client-performance', authorizePermission('reports', 'view'), valida
     let whereClause = 'WHERE 1=1';
     const whereParams = [];
 
-    // Workspace filter (primary) - explicitly qualified to avoid ambiguity in JOIN queries
-    const user = req.user;
-    const isSuperAdmin = user && (user.is_super_admin === true || user.is_super_admin === 1 || user.isSuperAdmin === true);
-    
-    if (!isSuperAdmin) {
-      const workspaceId = req.workspaceId || req.workspaceFilter?.value || user?.workspace_id || user?.workspaceId;
-      if (workspaceId) {
-        whereClause += ' AND c.workspace_id = ?';
-        whereParams.push(workspaceId);
-      } else {
-        whereClause += ' AND 1=0'; // No workspace = no results
-      }
+    // Workspace filter for everyone including super admin (show only their workspace)
+    const workspaceIdClient = req.workspaceId || req.workspaceFilter?.value || req.user?.workspace_id || req.user?.workspaceId;
+    if (workspaceIdClient) {
+      whereClause += ' AND c.workspace_id = ?';
+      whereParams.push(workspaceIdClient);
+    } else {
+      whereClause += ' AND 1=0';
     }
-    // Super admin: no workspace filter needed
 
     if (start_date) {
       whereClause += ' AND c.onboarding_date >= ?';
@@ -279,24 +264,15 @@ router.get('/client-performance', authorizePermission('reports', 'view'), valida
       ORDER BY total_invoiced DESC
     `, whereParams);
 
-    // Get client status distribution
-    // Use qualified workspace_id to avoid ambiguity
+    // Get client status distribution (same workspace filter as above)
     let statusDistributionWhere = 'WHERE 1=1';
     const statusDistributionParams = [];
-    
-    // Explicitly add workspace filter with qualified column name
-    // Reuse the user and isSuperAdmin variables already declared above
-    if (!isSuperAdmin) {
-      const workspaceId = req.workspaceId || req.workspaceFilter?.value || user?.workspace_id || user?.workspaceId;
-      if (workspaceId) {
-        statusDistributionWhere += ' AND c.workspace_id = ?';
-        statusDistributionParams.push(workspaceId);
-      } else {
-        statusDistributionWhere += ' AND 1=0'; // No workspace = no results
-      }
+    if (workspaceIdClient) {
+      statusDistributionWhere += ' AND c.workspace_id = ?';
+      statusDistributionParams.push(workspaceIdClient);
+    } else {
+      statusDistributionWhere += ' AND 1=0';
     }
-    // Super admin: no workspace filter needed
-    
     if (start_date) {
       statusDistributionWhere += ' AND c.onboarding_date >= ?';
       statusDistributionParams.push(start_date);
@@ -558,12 +534,12 @@ router.get('/invoices', authorizePermission('reports', 'view'), validateReportPa
 });
 
 // Get summary report (all key metrics)
+// Super admin also sees only their workspace data (req.workspaceId = Super admin workspace)
 router.get('/summary', authorizePermission('reports', 'view'), async (req, res) => {
   try {
     const workspaceId = req.workspaceId || req.workspaceFilter?.value;
-    const isSuperAdmin = req.isSuperAdmin === true;
-    const wsClause = isSuperAdmin ? '' : ' AND workspace_id = ?';
-    const repeat = (n) => (isSuperAdmin ? [] : Array(n).fill(workspaceId));
+    const wsClause = workspaceId ? ' AND workspace_id = ?' : ' AND 1=0';
+    const repeat = (n) => (workspaceId ? Array(n).fill(workspaceId) : []);
 
     // Get all key metrics
     const summary = await dbQuery(`

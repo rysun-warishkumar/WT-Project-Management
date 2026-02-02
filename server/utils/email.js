@@ -367,7 +367,7 @@ const sendVerificationEmail = async (userData, verificationToken) => {
             </p>
             
             <div style="text-align: center; margin: 30px 0;">
-              <a href="${verificationUrl}" 
+              <a href="${verificationUrl}" target="_blank" rel="noopener noreferrer"
                  style="display: inline-block; background-color: #4F46E5; color: white; padding: 12px 30px; text-decoration: none; border-radius: 6px; font-weight: bold;">
                 Verify Email Address
               </a>
@@ -375,7 +375,7 @@ const sendVerificationEmail = async (userData, verificationToken) => {
             
             <p style="font-size: 14px; color: #6b7280; margin-top: 30px;">
               Or copy and paste this link into your browser:<br>
-              <a href="${verificationUrl}" style="color: #4F46E5; word-break: break-all;">${verificationUrl}</a>
+              <a href="${verificationUrl}" target="_blank" rel="noopener noreferrer" style="color: #4F46E5; word-break: break-all;">${verificationUrl}</a>
             </p>
             
             <div style="background-color: #FEF3C7; border-left: 4px solid #F59E0B; padding: 15px; margin: 20px 0; border-radius: 4px;">

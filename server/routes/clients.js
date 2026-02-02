@@ -36,7 +36,9 @@ router.get('/', authorizePermission('clients', 'view'), [
     }
     return true;
   }),
-  query('business_type').optional().isLength({ max: 50 }).withMessage('Business type too long')
+  query('business_type').optional().isLength({ max: 50 }).withMessage('Business type too long'),
+  query('view').optional().isIn(['all_workspaces']).withMessage('Invalid view'),
+  query('workspace_id').optional().isInt({ min: 1 }).withMessage('workspace_id must be a positive integer')
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
@@ -55,21 +57,100 @@ router.get('/', authorizePermission('clients', 'view'), [
     const search = req.query.search || '';
     const status = req.query.status;
     const businessType = req.query.business_type;
+    const viewAllWorkspaces = req.query.view === 'all_workspaces' && req.isSuperAdmin;
+    const filterWorkspaceId = req.query.workspace_id ? parseInt(req.query.workspace_id, 10) : null;
 
-    // Build WHERE clause for COUNT query (no alias)
+    // Super admin: "Clients of another workspace" — list clients from other workspaces with workspace name
+    if (viewAllWorkspaces) {
+      let countWhereClause = 'WHERE c.deleted_at IS NULL AND c.workspace_id != ?';
+      const countWhereParams = [req.workspaceId];
+      let selectWhereClause = 'WHERE c.deleted_at IS NULL AND c.workspace_id != ?';
+      const selectWhereParams = [req.workspaceId];
+
+      if (filterWorkspaceId) {
+        countWhereClause += ' AND c.workspace_id = ?';
+        countWhereParams.push(filterWorkspaceId);
+        selectWhereClause += ' AND c.workspace_id = ?';
+        selectWhereParams.push(filterWorkspaceId);
+      }
+      if (search) {
+        const searchTerm = `%${search}%`;
+        countWhereClause += ' AND (c.full_name LIKE ? OR c.company_name LIKE ? OR c.email LIKE ? OR c.phone LIKE ?)';
+        countWhereParams.push(searchTerm, searchTerm, searchTerm, searchTerm);
+        selectWhereClause += ' AND (c.full_name LIKE ? OR c.company_name LIKE ? OR c.email LIKE ? OR c.phone LIKE ?)';
+        selectWhereParams.push(searchTerm, searchTerm, searchTerm, searchTerm);
+      }
+      if (status) {
+        countWhereClause += ' AND c.status = ?';
+        countWhereParams.push(status);
+        selectWhereClause += ' AND c.status = ?';
+        selectWhereParams.push(status);
+      }
+      if (businessType) {
+        countWhereClause += ' AND c.business_type = ?';
+        countWhereParams.push(businessType);
+        selectWhereClause += ' AND c.business_type = ?';
+        selectWhereParams.push(businessType);
+      }
+
+      const countResult = await dbQuery(
+        `SELECT COUNT(*) as total FROM clients c ${countWhereClause}`,
+        countWhereParams
+      );
+      const total = countResult[0].total;
+
+      const clients = await dbQuery(
+        `SELECT 
+          c.*,
+          w.name AS workspace_name,
+          COALESCE(pc.project_count, 0) as project_count,
+          COALESCE(pc.completed_projects, 0) as completed_projects,
+          COALESCE(pc.active_projects, 0) as active_projects
+         FROM clients c
+         LEFT JOIN workspaces w ON c.workspace_id = w.id AND (COALESCE(w.active, 1) = 1)
+         LEFT JOIN (
+           SELECT 
+             client_id,
+             COUNT(*) as project_count,
+             COUNT(CASE WHEN status = 'completed' THEN 1 END) as completed_projects,
+             COUNT(CASE WHEN status = 'in_progress' THEN 1 END) as active_projects
+           FROM projects
+           WHERE deleted_at IS NULL
+           GROUP BY client_id
+         ) pc ON c.id = pc.client_id
+         ${selectWhereClause}
+         ORDER BY c.created_at DESC
+         LIMIT ? OFFSET ?`,
+        [...selectWhereParams, limit, offset]
+      );
+
+      res.set({
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0'
+      });
+      return res.json({
+        success: true,
+        data: {
+          clients,
+          pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
+          filters: { businessTypes: [] },
+          view: 'all_workspaces'
+        }
+      });
+    }
+
+    // Default: workspace-filtered list (super admin sees only Super admin workspace; others see their workspace)
     let countWhereClause = 'WHERE 1=1';
     const countWhereParams = [];
 
-    // Build WHERE clause for SELECT query (with alias)
     let selectWhereClause = 'WHERE 1=1';
     const selectWhereParams = [];
 
-    // Add workspace filter (primary) and client filter (legacy support)
-    // For COUNT query - no alias
     const countWorkspaceFilter = getWorkspaceFilter(req, '', 'workspace_id');
     countWhereClause += countWorkspaceFilter.whereClause;
     countWhereParams.push(...countWorkspaceFilter.whereParams);
-    
+
     const countClientFilter = getClientFilter(req, '', 'id');
     countWhereClause += countClientFilter.whereClause;
     countWhereParams.push(...countClientFilter.whereParams);
@@ -77,11 +158,10 @@ router.get('/', authorizePermission('clients', 'view'), [
     countWhereClause += ' AND (deleted_at IS NULL)';
     selectWhereClause += ' AND (c.deleted_at IS NULL)';
 
-    // For SELECT query - with alias
     const selectWorkspaceFilter = getWorkspaceFilter(req, 'c', 'workspace_id');
     selectWhereClause += selectWorkspaceFilter.whereClause;
     selectWhereParams.push(...selectWorkspaceFilter.whereParams);
-    
+
     const selectClientFilter = getClientFilter(req, 'c', 'id');
     selectWhereClause += selectClientFilter.whereClause;
     selectWhereParams.push(...selectClientFilter.whereParams);
@@ -108,38 +188,35 @@ router.get('/', authorizePermission('clients', 'view'), [
       selectWhereParams.push(businessType);
     }
 
-    // Get total count
     const countResult = await dbQuery(
       `SELECT COUNT(*) as total FROM clients ${countWhereClause}`,
       countWhereParams
     );
     const total = countResult[0].total;
 
-         // Get clients with pagination
-     const clients = await dbQuery(
-       `SELECT 
-         c.*,
-         COALESCE(pc.project_count, 0) as project_count,
-         COALESCE(pc.completed_projects, 0) as completed_projects,
-         COALESCE(pc.active_projects, 0) as active_projects
-        FROM clients c
-        LEFT JOIN (
-          SELECT 
-            client_id,
-            COUNT(*) as project_count,
-            COUNT(CASE WHEN status = 'completed' THEN 1 END) as completed_projects,
-            COUNT(CASE WHEN status = 'in_progress' THEN 1 END) as active_projects
-          FROM projects
-          WHERE deleted_at IS NULL
-          GROUP BY client_id
-        ) pc ON c.id = pc.client_id
-        ${selectWhereClause}
-        ORDER BY c.created_at DESC
-        LIMIT ? OFFSET ?`,
-       [...selectWhereParams, limit, offset]
-     );
+    const clients = await dbQuery(
+      `SELECT 
+        c.*,
+        COALESCE(pc.project_count, 0) as project_count,
+        COALESCE(pc.completed_projects, 0) as completed_projects,
+        COALESCE(pc.active_projects, 0) as active_projects
+       FROM clients c
+       LEFT JOIN (
+         SELECT 
+           client_id,
+           COUNT(*) as project_count,
+           COUNT(CASE WHEN status = 'completed' THEN 1 END) as completed_projects,
+           COUNT(CASE WHEN status = 'in_progress' THEN 1 END) as active_projects
+         FROM projects
+         WHERE deleted_at IS NULL
+         GROUP BY client_id
+       ) pc ON c.id = pc.client_id
+       ${selectWhereClause}
+       ORDER BY c.created_at DESC
+       LIMIT ? OFFSET ?`,
+      [...selectWhereParams, limit, offset]
+    );
 
-    // Get business types for filter (with workspace filter)
     const businessTypesWorkspaceFilter = getWorkspaceFilter(req, '', 'workspace_id');
     const businessTypes = await dbQuery(
       `SELECT DISTINCT business_type FROM clients 
@@ -296,12 +373,18 @@ router.post('/', authorizePermission('clients', 'create'), clientValidation, asy
       notes
     } = req.body;
 
-    // Get workspace ID
+    // Get workspace ID (super admin uses "Super admin workspace" from middleware)
     const workspaceId = req.workspaceId || req.workspaceFilter?.value;
     if (!workspaceId && !req.isSuperAdmin) {
       return res.status(403).json({
         success: false,
         message: 'Workspace context required'
+      });
+    }
+    if (req.isSuperAdmin && !workspaceId) {
+      return res.status(500).json({
+        success: false,
+        message: 'Super admin workspace could not be loaded. Please try again or contact support.'
       });
     }
 

@@ -120,7 +120,6 @@ const ClientDetail = () => {
             className="btn btn-outline btn-sm"
           >
             <ArrowLeft className="h-4 w-4 mr-2" />
-            Back to Clients
           </button>
           <div>
             <h1 className="text-2xl font-bold text-gray-900">{client.full_name}</h1>

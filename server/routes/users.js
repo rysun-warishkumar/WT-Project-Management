@@ -57,14 +57,18 @@ router.get('/', authorizePermission('users', 'view'), [
     const clientId = req.query.client_id || '';
     const isActive = req.query.is_active;
 
+    const isSuperAdmin = req.isSuperAdmin === true;
+
     // Build WHERE clause
     let whereClause = 'WHERE 1=1';
     const whereParams = [];
 
-    // Workspace filter (primary)
-    const ws = getWorkspaceFilter(req, 'u', 'workspace_id');
-    whereClause += ws.whereClause;
-    whereParams.push(...ws.whereParams);
+    // Workspace filter: super admin sees all users (workspace column shows affiliation); others see only their workspace
+    if (!isSuperAdmin) {
+      const ws = getWorkspaceFilter(req, 'u', 'workspace_id');
+      whereClause += ws.whereClause;
+      whereParams.push(...ws.whereParams);
+    }
 
     if (search) {
       whereClause += ' AND (u.full_name LIKE ? OR u.email LIKE ? OR u.username LIKE ?)';
@@ -86,8 +90,6 @@ router.get('/', authorizePermission('users', 'view'), [
       whereClause += ' AND u.is_active = ?';
       whereParams.push(isActive === 'true' || isActive === true);
     }
-
-    const isSuperAdmin = req.isSuperAdmin === true;
 
     // Get users with related data (super admin also gets workspace name)
     const users = await dbQuery(
@@ -116,9 +118,9 @@ router.get('/', authorizePermission('users', 'view'), [
       [...whereParams, limit, offset]
     );
 
-    // Get projects assigned to each user
+    // Get projects assigned to each user (super admin: show all assigned; others: filter by workspace)
     for (const user of users) {
-      const wsProj = getWorkspaceFilter(req, 'p', 'workspace_id');
+      const wsProj = isSuperAdmin ? { whereClause: '', whereParams: [] } : getWorkspaceFilter(req, 'p', 'workspace_id');
       const userProjects = await dbQuery(
         `SELECT p.id, p.title, p.status
          FROM projects p
