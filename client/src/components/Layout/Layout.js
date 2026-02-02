@@ -165,42 +165,44 @@ const Layout = () => {
                 <Bell className="h-6 w-6" />
               </button>
 
-              {/* User menu */}
-              <div className="ml-3 relative">
-                <div>
-                  <button
-                    type="button"
-                    className="max-w-xs bg-white flex items-center text-sm rounded-full focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500"
-                    onClick={() => setUserMenuOpen(!userMenuOpen)}
-                  >
-                    <div className="h-8 w-8 rounded-full bg-primary-600 flex items-center justify-center">
-                      <User className="h-5 w-5 text-white" />
-                    </div>
-                    <span className="ml-2 text-gray-700">{user?.full_name}</span>
-                  </button>
-                </div>
+              {/* User menu – clicking icon or name opens dropdown with Profile and Sign out */}
+              <div className="ml-3 relative overflow-visible">
+                <button
+                  type="button"
+                  className="flex items-center rounded-full focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500"
+                  onClick={() => setUserMenuOpen(!userMenuOpen)}
+                  aria-expanded={userMenuOpen}
+                  aria-haspopup="menu"
+                >
+                  <div className="h-8 w-8 rounded-full bg-primary-600 flex items-center justify-center flex-shrink-0">
+                    <User className="h-5 w-5 text-white" />
+                  </div>
+                  <span className="ml-2 text-sm text-gray-700">{user?.full_name}</span>
+                </button>
 
                 {userMenuOpen && (
-                  <div className="dropdown">
+                  <div className="dropdown" role="menu">
                     <div className="py-1">
                       <button
+                        type="button"
                         onClick={() => {
                           setUserMenuOpen(false);
-                          navigate('/settings');
+                          navigate('/settings?tab=profile');
                         }}
-                        className="dropdown-item"
+                        className="dropdown-item flex items-center w-full"
                       >
-                        <User className="mr-3 h-4 w-4" />
+                        <User className="mr-3 h-4 w-4 flex-shrink-0" />
                         Profile
                       </button>
                       <button
+                        type="button"
                         onClick={() => {
                           setUserMenuOpen(false);
                           handleLogout();
                         }}
-                        className="dropdown-item text-danger-600 hover:bg-danger-50"
+                        className="dropdown-item flex items-center w-full text-danger-600 hover:bg-danger-50"
                       >
-                        <LogOut className="mr-3 h-4 w-4" />
+                        <LogOut className="mr-3 h-4 w-4 flex-shrink-0" />
                         Sign out
                       </button>
                     </div>

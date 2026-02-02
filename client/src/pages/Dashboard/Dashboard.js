@@ -1,4 +1,5 @@
 import React from 'react';
+import { Link } from 'react-router-dom';
 import { useQuery } from 'react-query';
 import {
   Users,
@@ -271,22 +272,34 @@ const Dashboard = () => {
         </div>
         <div className="card-body">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <button className="flex flex-col items-center p-4 bg-primary-50 rounded-lg hover:bg-primary-100 transition-colors">
+            <Link
+              to="/clients"
+              className="flex flex-col items-center p-4 bg-primary-50 rounded-lg hover:bg-primary-100 transition-colors"
+            >
               <Users className="h-8 w-8 text-primary-600 mb-2" />
               <span className="text-sm font-medium text-primary-900">Add Client</span>
-            </button>
-            <button className="flex flex-col items-center p-4 bg-success-50 rounded-lg hover:bg-success-100 transition-colors">
+            </Link>
+            <Link
+              to="/projects"
+              className="flex flex-col items-center p-4 bg-success-50 rounded-lg hover:bg-success-100 transition-colors"
+            >
               <FolderOpen className="h-8 w-8 text-success-600 mb-2" />
               <span className="text-sm font-medium text-success-900">New Project</span>
-            </button>
-            <button className="flex flex-col items-center p-4 bg-warning-50 rounded-lg hover:bg-warning-100 transition-colors">
+            </Link>
+            <Link
+              to="/quotations"
+              className="flex flex-col items-center p-4 bg-warning-50 rounded-lg hover:bg-warning-100 transition-colors"
+            >
               <FileText className="h-8 w-8 text-warning-600 mb-2" />
               <span className="text-sm font-medium text-warning-900">Create Quote</span>
-            </button>
-            <button className="flex flex-col items-center p-4 bg-danger-50 rounded-lg hover:bg-danger-100 transition-colors">
+            </Link>
+            <Link
+              to="/invoices"
+              className="flex flex-col items-center p-4 bg-danger-50 rounded-lg hover:bg-danger-100 transition-colors"
+            >
               <Receipt className="h-8 w-8 text-danger-600 mb-2" />
               <span className="text-sm font-medium text-danger-900">New Invoice</span>
-            </button>
+            </Link>
           </div>
         </div>
       </div>

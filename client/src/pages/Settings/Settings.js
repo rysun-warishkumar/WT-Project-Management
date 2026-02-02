@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { useQuery, useMutation, useQueryClient } from 'react-query';
 import { useAuth } from '../../contexts/AuthContext';
@@ -25,11 +26,36 @@ import {
 } from 'lucide-react';
 import { settingsAPI } from '../../services/api';
 
+const VALID_TABS = ['profile', 'password', 'account', 'smtp'];
+
 const Settings = () => {
   const { user, updateProfile, changePassword } = useAuth();
   const queryClient = useQueryClient();
+  const [searchParams, setSearchParams] = useSearchParams();
   const isSuperAdmin = Boolean(user?.is_super_admin || user?.isSuperAdmin);
-  const [activeTab, setActiveTab] = useState('profile');
+
+  // Initialize activeTab from URL ?tab= so the tab persists on refresh
+  const tabFromUrl = searchParams.get('tab');
+  const initialTab = VALID_TABS.includes(tabFromUrl)
+    ? (tabFromUrl === 'smtp' && !isSuperAdmin ? 'profile' : tabFromUrl)
+    : 'profile';
+  const [activeTab, setActiveTab] = useState(initialTab);
+
+  // Sync URL when tab changes (so refresh keeps the same tab)
+  useEffect(() => {
+    const current = searchParams.get('tab');
+    if (activeTab !== (current || 'profile')) {
+      setSearchParams({ tab: activeTab }, { replace: true });
+    }
+  }, [activeTab]);
+
+  // When URL tab param changes (e.g. back/forward), update activeTab
+  useEffect(() => {
+    const t = searchParams.get('tab');
+    if (t && VALID_TABS.includes(t) && (t !== 'smtp' || isSuperAdmin)) {
+      setActiveTab(t);
+    }
+  }, [searchParams, isSuperAdmin]);
 
   // If non-super-admin lands on SMTP tab (e.g. from state), switch to profile
   useEffect(() => {
@@ -423,7 +449,7 @@ const Settings = () => {
       <div className="border-b border-gray-200">
         <nav className="flex flex-wrap gap-2 -mb-px">
           <button
-            onClick={() => setActiveTab('profile')}
+            onClick={() => { setActiveTab('profile'); setSearchParams({ tab: 'profile' }, { replace: true }); }}
             className={`inline-flex items-center px-3 py-2 text-xs sm:text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
               activeTab === 'profile'
                 ? 'border-primary-600 text-primary-600'
@@ -434,7 +460,7 @@ const Settings = () => {
             Profile Settings
           </button>
           <button
-            onClick={() => setActiveTab('password')}
+            onClick={() => { setActiveTab('password'); setSearchParams({ tab: 'password' }, { replace: true }); }}
             className={`inline-flex items-center px-3 py-2 text-xs sm:text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
               activeTab === 'password'
                 ? 'border-primary-600 text-primary-600'
@@ -445,7 +471,7 @@ const Settings = () => {
             Change Password
           </button>
           <button
-            onClick={() => setActiveTab('account')}
+            onClick={() => { setActiveTab('account'); setSearchParams({ tab: 'account' }, { replace: true }); }}
             className={`inline-flex items-center px-3 py-2 text-xs sm:text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
               activeTab === 'account'
                 ? 'border-primary-600 text-primary-600'
@@ -457,7 +483,7 @@ const Settings = () => {
           </button>
           {isSuperAdmin && (
             <button
-              onClick={() => setActiveTab('smtp')}
+              onClick={() => { setActiveTab('smtp'); setSearchParams({ tab: 'smtp' }, { replace: true }); }}
               className={`inline-flex items-center px-3 py-2 text-xs sm:text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
                 activeTab === 'smtp'
                   ? 'border-primary-600 text-primary-600'
@@ -956,6 +982,14 @@ const Settings = () => {
                     <p className="text-sm text-amber-700 mt-1">
                       Contact sales to upgrade and continue using the platform.
                     </p>
+                    <a
+                      href="https://cms.wtechnology.in/contact"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center mt-3 px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-medium rounded-md transition-colors"
+                    >
+                      Contact to Upgrade Your Plan
+                    </a>
                   </div>
                 </div>
               </div>
