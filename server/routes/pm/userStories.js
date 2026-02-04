@@ -484,7 +484,9 @@ router.put('/:id', authorizePermission('projects', 'edit'), [
     }
     if (epic_id !== undefined) {
       updateFields.push('epic_id = ?');
-      updateValues.push(epic_id || null);
+      const parsed = parseInt(epic_id, 10);
+      const resolvedEpicId = (epic_id !== null && epic_id !== '' && !Number.isNaN(parsed) && parsed > 0) ? parsed : null;
+      updateValues.push(resolvedEpicId);
     }
     if (sprint_id !== undefined) {
       updateFields.push('sprint_id = ?');

@@ -1,25 +1,21 @@
 const { query: dbQuery } = require('../config/database');
 
 /**
- * Generate unique reference number for epics
+ * Generate unique reference number for epics (id-based to avoid duplicates on live)
  * Format: EPIC-{workspace_id}-{sequential_number}
+ * Uses MAX(id)+1 so sequence is deterministic and unique even when AUTO_INCREMENT returns 0.
  * @param {number} workspaceId - Workspace ID
  * @returns {Promise<string>} Generated reference number
  */
 const generateEpicReference = async (workspaceId) => {
   try {
-    // Get the highest sequential number for this workspace
     const [result] = await dbQuery(
-      `SELECT COALESCE(MAX(CAST(SUBSTRING_INDEX(reference_number, '-', -1) AS UNSIGNED)), 0) as max_num
-       FROM pm_epics
-       WHERE workspace_id = ? AND reference_number LIKE ?`,
-      [workspaceId, `EPIC-${workspaceId}-%`]
+      `SELECT COALESCE(MAX(id), 0) + 1 AS next_num FROM pm_epics WHERE workspace_id = ?`,
+      [workspaceId]
     );
 
-    const nextNum = (result.max_num || 0) + 1;
-    const referenceNumber = `EPIC-${workspaceId}-${String(nextNum).padStart(3, '0')}`;
-
-    return referenceNumber;
+    const nextNum = result?.next_num ? Number(result.next_num) : 1;
+    return `EPIC-${workspaceId}-${String(nextNum).padStart(3, '0')}`;
   } catch (error) {
     console.error('Error generating epic reference:', error);
     throw new Error('Failed to generate epic reference number');

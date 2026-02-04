@@ -307,10 +307,19 @@ router.post('/', authorizePermission('projects', 'create'), [
       }
     }
 
+    // Ensure reference_number is id-based (fixes duplicates and id=0 on live)
+    const idBasedReference = `EPIC-${workspace_id}-${String(epicId).padStart(3, '0')}`;
+    if (idBasedReference !== referenceNumber) {
+      await dbQuery(
+        'UPDATE pm_epics SET reference_number = ? WHERE id = ?',
+        [idBasedReference, epicId]
+      );
+    }
+
     // Log activity
     await logCreation(workspace_id, 'epic', epicId, userId, {
       name,
-      reference_number: referenceNumber
+      reference_number: idBasedReference
     });
 
     // Get created epic
