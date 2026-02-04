@@ -423,9 +423,74 @@ ${getEmailFooterText()}
   }
 };
 
+// Send password reset email
+const sendPasswordResetEmail = async (userData, resetToken) => {
+  try {
+    const smtpConfig = await getSmtpConfig();
+    const transporter = await createTransporter();
+    const fromEmail = smtpConfig?.from || smtpConfig?.auth?.user || process.env.SMTP_FROM || process.env.SMTP_USER || 'noreply@example.com';
+    const fromAddress = `"${APP_NAME}" <${fromEmail}>`;
+    const baseUrl = process.env.CLIENT_URL || process.env.APP_URL || 'http://localhost:3000';
+    const resetUrl = `${baseUrl.replace(/\/+$/, '')}/reset-password?token=${encodeURIComponent(resetToken)}`;
+
+    const mailOptions = {
+      from: fromAddress,
+      to: userData.email,
+      subject: `Reset Your Password - ${APP_NAME}`,
+      html: `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Reset Your Password</title>
+        </head>
+        <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+          <div style="background-color: #4F46E5; color: white; padding: 20px; text-align: center; border-radius: 8px 8px 0 0;">
+            <h1 style="margin: 0;">Reset Your Password</h1>
+          </div>
+          <div style="background-color: #f9fafb; padding: 30px; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 8px 8px;">
+            <p style="font-size: 16px; margin-bottom: 20px;">Dear ${userData.full_name || userData.email},</p>
+            <p style="font-size: 16px; margin-bottom: 20px;">
+              We received a request to reset your password. Click the button below to set a new password:
+            </p>
+            <div style="text-align: center; margin: 30px 0;">
+              <a href="${resetUrl}" target="_blank" rel="noopener noreferrer"
+                 style="display: inline-block; background-color: #4F46E5; color: white; padding: 12px 30px; text-decoration: none; border-radius: 6px; font-weight: bold;">
+                Reset Password
+              </a>
+            </div>
+            <p style="font-size: 14px; color: #6b7280; margin-top: 30px;">
+              Or copy and paste this link into your browser:<br>
+              <a href="${resetUrl}" target="_blank" rel="noopener noreferrer" style="color: #4F46E5; word-break: break-all;">${resetUrl}</a>
+            </p>
+            <div style="background-color: #FEF3C7; border-left: 4px solid #F59E0B; padding: 15px; margin: 20px 0; border-radius: 4px;">
+              <p style="margin: 0; font-size: 14px;">
+                <strong>⚠️ Important:</strong> This link expires in 1 hour. If you didn't request a password reset, please ignore this email and your password will remain unchanged.
+              </p>
+            </div>
+            <p style="font-size: 16px; margin-top: 30px;">Best regards,<br><strong>${APP_NAME} Team</strong></p>
+            ${getEmailFooter()}
+          </div>
+        </body>
+        </html>
+      `,
+      text: `Reset Your Password\n\nDear ${userData.full_name || userData.email},\n\nWe received a request to reset your password. Visit this link to set a new password:\n${resetUrl}\n\n⚠️ This link expires in 1 hour. If you didn't request this, please ignore this email.\n\nBest regards,\n${APP_NAME} Team\n${getEmailFooterText()}`,
+    };
+
+    const info = await transporter.sendMail(mailOptions);
+    console.log('Password reset email sent successfully:', info.messageId);
+    return { success: true, messageId: info.messageId };
+  } catch (error) {
+    console.error('Error sending password reset email:', error);
+    return { success: false, error: error.message };
+  }
+};
+
 module.exports = {
   sendClientCredentials,
   sendVerificationEmail,
+  sendPasswordResetEmail,
   createTransporter,
   getSmtpConfig,
 };

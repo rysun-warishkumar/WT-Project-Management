@@ -10,39 +10,22 @@ import {
   Lock,
   CheckCircle,
   AlertCircle,
-  Users,
-  FileText,
-  BarChart3,
+  Shield,
+  UserPlus,
+  FolderPlus,
+  TrendingUp,
 } from 'lucide-react';
 import { authAPI } from '../../services/api';
 import toast from 'react-hot-toast';
 
-const STEPS = [
-  {
-    title: 'Register with your email',
-    description:
-      'Register your workspace and start managing your clients and projects.',
-    icon: Users,
-  },
-  {
-    title: 'Add clients & projects',
-    description:
-      'Add clients and projects. Link work to clients so every quote, invoice, and sprint stays connected.',
-    icon: FileText,
-  },
-  {
-    title: 'Track & grow',
-    description:
-      'Use reports and dashboards to see revenue, outstanding amounts, project status, sprint velocity, and burndown at a glance.',
-    icon: BarChart3,
-  },
-];
+const AUTH_BG_IMAGE = '/images/auth-panel2.jpg';
 
 const Register = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [registrationSuccess, setRegistrationSuccess] = useState(false);
+  const [bgImageError, setBgImageError] = useState(false);
   const navigate = useNavigate();
 
   const {
@@ -50,15 +33,12 @@ const Register = () => {
     handleSubmit,
     watch,
     formState: { errors },
-  } = useForm({
-    mode: 'onChange',
-  });
+  } = useForm({ mode: 'onChange' });
 
   const password = watch('password');
 
   const onSubmit = async (data) => {
     setIsLoading(true);
-
     try {
       const response = await authAPI.register({
         email: data.email.trim().toLowerCase(),
@@ -66,7 +46,6 @@ const Register = () => {
         full_name: data.full_name.trim(),
         workspace_name: data.workspace_name.trim(),
       });
-
       if (response.data.success) {
         setRegistrationSuccess(true);
         toast.success('Registration successful! Please check your email to verify your account.');
@@ -75,23 +54,18 @@ const Register = () => {
       }
     } catch (error) {
       console.error('Registration error:', error);
-
       if (error.response?.data?.errors) {
-        const validationErrors = error.response.data.errors;
-        validationErrors.forEach((err) => {
+        (error.response.data.errors || []).forEach((err) => {
           toast.error(err.msg || err.message || 'Validation error');
         });
       } else {
         const msg = error.response?.data?.message;
         const isTimeout = error.code === 'ECONNABORTED' || error.message?.includes('timeout');
-        const isEmailFailure =
-          msg?.toLowerCase().includes('email verification') || error.response?.status === 503;
+        const isEmailFailure = msg?.toLowerCase().includes('email verification') || error.response?.status === 503;
         if (isTimeout || isEmailFailure) {
           toast.error(msg || 'Failed to send email verification. Please try again later.');
         } else {
-          toast.error(
-            msg || 'Registration failed. Please try again.' || 'An unexpected error occurred'
-          );
+          toast.error(msg || 'Registration failed. Please try again.' || 'An unexpected error occurred');
         }
       }
     } finally {
@@ -99,38 +73,35 @@ const Register = () => {
     }
   };
 
-  // Success screen (100vh, no scroll)
   if (registrationSuccess) {
     return (
-      <div className="h-screen flex flex-col overflow-hidden bg-white">
-        <div className="flex-1 flex items-center justify-center overflow-y-auto px-4 py-6">
-          <div className="max-w-md w-full bg-white rounded-lg text-center">
-            <div className="inline-flex h-14 w-14 bg-success-100 rounded-full items-center justify-center mb-4">
-              <CheckCircle className="h-7 w-7 text-success-600" />
+      <div className="auth-page">
+        <div className="auth-page-bg">
+          {!bgImageError && <img src={AUTH_BG_IMAGE} alt="" onError={() => setBgImageError(true)} />}
+          {!bgImageError ? <div className="auth-page-overlay" aria-hidden /> : <div className="auth-page-overlay-fallback" aria-hidden />}
+        </div>
+        <div className="auth-glass-card" style={{ maxWidth: '28rem' }}>
+          <div className="auth-form-panel w-full">
+            <div className="inline-flex h-12 w-12 bg-success-100 rounded-full items-center justify-center mb-4">
+              <CheckCircle className="h-6 w-6 text-success-600" />
             </div>
             <h2 className="text-xl font-bold text-gray-900 mb-2">Registration Successful!</h2>
             <p className="text-sm text-gray-600 mb-4">
-              We&apos;ve sent a verification email to your inbox. Please check your email and click
-              the verification link to activate your account.
+              We&apos;ve sent a verification email to your inbox. Please check your email and click the verification link to activate your account.
             </p>
             <div className="bg-primary-50 border border-primary-200 rounded-lg p-3 mb-4 text-left">
               <p className="text-xs text-primary-800 font-medium">Didn&apos;t receive the email?</p>
-              <p className="text-xs text-primary-700 mt-0.5">
-                Check your spam folder or click the resend button below.
-              </p>
+              <p className="text-xs text-primary-700 mt-0.5">Check your spam folder or use the resend link below.</p>
             </div>
             <div className="space-y-2">
               <button
                 onClick={() => navigate('/login')}
-                className="w-full py-2.5 px-4 border border-transparent text-sm font-medium rounded-lg text-white bg-primary-600 hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 transition-colors duration-200"
+                className="auth-btn-primary"
               >
                 Go to Login
               </button>
-              <Link
-                to="/login"
-                className="block text-sm text-center text-primary-600 hover:text-primary-500"
-              >
-                Already verified? Sign in
+              <Link to="/resend-verification" className="block text-center text-sm auth-link mt-2">
+                Resend verification email
               </Link>
             </div>
           </div>
@@ -139,85 +110,70 @@ const Register = () => {
     );
   }
 
-  const scrollToForm = () => {
-    const el = document.getElementById('register-form');
-    if (el) el.scrollIntoView({ behavior: 'smooth' });
-  };
-
   return (
-    <div className="h-screen flex flex-col lg:flex-row overflow-hidden bg-white">
-      {/* Left panel: Create Account + 3 steps (primary theme), glass card */}
-      <div className="flex-shrink-0 lg:w-1/2 bg-primary-600 flex flex-col justify-center px-6 py-6 lg:py-8 order-1 overflow-y-auto relative">
-        <div className="absolute inset-0 bg-gradient-to-br from-primary-500/30 to-primary-700/50 pointer-events-none" aria-hidden />
-        <div className="max-w-md w-full mx-auto relative z-10 rounded-2xl bg-white/10 backdrop-blur-md border border-white/20 shadow-xl px-6 py-8 lg:px-8 lg:py-10">
-          <h1 className="text-xl sm:text-2xl font-bold text-white mb-1">Let&apos;s get your started</h1>
-          <p className="text-primary-200 text-xs sm:text-sm mb-6">
-          All your clients, projects, and payments — in one place.
-          </p>
-
-          <p className="text-primary-200 text-xs font-medium uppercase tracking-wide mb-4">
-            How it works
-          </p>
-          <h2 className="text-lg font-bold text-white mb-4">Three simple steps to a stress-free workflow</h2>
-          <p className="text-primary-100 text-sm mb-6">
-          No complicated setup. No learning curve.
-          Just a smarter way to manage clients, projects, and deliveries from day one.
-          </p>
-
-          <div className="space-y-4">
-            {STEPS.map((step, index) => {
-              const Icon = step.icon;
-              return (
-                <div key={index} className="flex gap-3">
-                  <div className="flex-shrink-0 h-10 w-10 rounded-lg bg-primary-500/50 border border-primary-400 flex items-center justify-center">
-                    <Icon className="h-5 w-5 text-white" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-primary-300 text-xs font-medium">Step {index + 1}</p>
-                    <h3 className="text-white font-semibold text-sm mt-0.5">{step.title}</h3>
-                    <p className="text-primary-100 text-xs mt-1 leading-relaxed">
-                      {step.description}
-                    </p>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-
-          {/* <button
-            type="button"
-            onClick={scrollToForm}
-            className="mt-6 inline-flex items-center justify-center px-6 py-2.5 border-2 border-white text-white text-sm font-medium rounded-lg hover:bg-white hover:text-primary-600 transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-white"
-          >
-            Sign up
-          </button> */}
-        </div>
+    <div className="auth-page">
+      <div className="auth-page-bg">
+        {!bgImageError && <img src={AUTH_BG_IMAGE} alt="" onError={() => setBgImageError(true)} />}
+        {!bgImageError ? <div className="auth-page-overlay" aria-hidden /> : <div className="auth-page-overlay-fallback" aria-hidden />}
       </div>
 
-      {/* Right panel: Registration form — glass effect */}
-      <div
-        id="register-form"
-        className="flex-1 flex flex-col min-h-0 overflow-y-auto bg-gradient-to-b from-primary-50/30 to-white order-2 justify-center items-center"
-      >
-        <div className="flex flex-col justify-center w-full max-w-md mx-auto px-6 py-6 lg:py-8">
-          <div className="text-center mb-4">
-            <div className="inline-flex h-12 w-12 bg-primary-600 rounded-full items-center justify-center shadow-lg">
-              <Building2 className="h-6 w-6 text-white" />
+      <div className="auth-glass-card">
+        <div className="auth-panel-left">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="flex items-center justify-center w-11 h-11 rounded-xl bg-white/20 text-white shadow-lg">
+              <Shield className="w-6 h-6" aria-hidden />
             </div>
-            <h2 className="mt-4 text-xl font-bold text-gray-900">Create your account</h2>
-            <p className="mt-1 text-sm text-gray-600">Start managing your clients and projects today</p>
+            <span className="text-lg font-bold text-white tracking-tight">WT Project Management</span>
           </div>
+          <h1 className="text-2xl md:text-3xl font-bold text-white tracking-tight">Create your account</h1>
+          <p className="mt-2 text-sm md:text-base text-white/80 leading-snug">
+            Register your workspace and start managing clients, projects, quotations, and invoices in one place.
+          </p>
 
-          <div className="bg-white/70 backdrop-blur-xl rounded-2xl border border-white/60 shadow-xl shadow-primary-900/5 px-5 py-5">
-          <form className="space-y-4" onSubmit={handleSubmit(onSubmit)}>
+          <ul className="mt-6 space-y-4" aria-label="How it works">
+            <li className="flex items-start gap-3">
+              <span className="flex-shrink-0 flex items-center justify-center w-9 h-9 rounded-lg bg-white/15 text-white" aria-hidden>
+                <UserPlus className="w-4 h-4" />
+              </span>
+              <div>
+                <span className="text-sm font-semibold text-white block">1. Register</span>
+                <span className="text-xs text-white/75 leading-snug">Create your workspace and verify your email.</span>
+              </div>
+            </li>
+            <li className="flex items-start gap-3">
+              <span className="flex-shrink-0 flex items-center justify-center w-9 h-9 rounded-lg bg-white/15 text-white" aria-hidden>
+                <FolderPlus className="w-4 h-4" />
+              </span>
+              <div>
+                <span className="text-sm font-semibold text-white block">2. Add clients & projects</span>
+                <span className="text-xs text-white/75 leading-snug">Link work to clients; manage quotes and invoices in one place.</span>
+              </div>
+            </li>
+            <li className="flex items-start gap-3">
+              <span className="flex-shrink-0 flex items-center justify-center w-9 h-9 rounded-lg bg-white/15 text-white" aria-hidden>
+                <TrendingUp className="w-4 h-4" />
+              </span>
+              <div>
+                <span className="text-sm font-semibold text-white block">3. Track your growth</span>
+                <span className="text-xs text-white/75 leading-snug">Use reports and dashboards for revenue, pipeline, and status.</span>
+              </div>
+            </li>
+          </ul>
+
+          <p className="auth-footer-left">
+            Built with ❤️ by <span>W | Technology</span>
+          </p>
+        </div>
+
+        <div className="auth-form-panel overflow-y-auto">
+          <h2 className="text-lg font-semibold text-gray-900">Sign up</h2>
+          <p className="mt-0.5 text-xs text-gray-600">Enter your details to create your workspace.</p>
+
+          <form className="mt-4 space-y-3" onSubmit={handleSubmit(onSubmit)}>
             <div>
-              <label htmlFor="full_name" className="form-label text-sm">
-                Full Name <span className="text-danger-500">*</span>
-              </label>
+              <label htmlFor="full_name" className="auth-label">Full name <span className="text-red-500">*</span></label>
               <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                  <User className="h-5 w-5 text-gray-400" />
-                </div>
+                <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
                 <input
                   id="full_name"
                   type="text"
@@ -225,104 +181,58 @@ const Register = () => {
                     required: 'Full name is required',
                     minLength: { value: 2, message: 'Full name must be at least 2 characters' },
                     maxLength: { value: 100, message: 'Full name must not exceed 100 characters' },
-                    pattern: {
-                      value: /^[a-zA-Z\s'-]+$/,
-                      message: "Full name can only contain letters, spaces, hyphens, and apostrophes",
-                    },
+                    pattern: { value: /^[a-zA-Z\s'-]+$/, message: 'Full name can only contain letters, spaces, hyphens, and apostrophes' },
                   })}
-                  className={`form-input pl-10 py-2 text-sm ${
-                    errors.full_name ? 'border-danger-500' : ''
-                  }`}
                   placeholder="Enter your full name"
+                  className={`auth-input pl-9 ${errors.full_name ? 'auth-input-error' : ''}`}
                 />
+                {errors.full_name && <p className="auth-error-msg flex items-center gap-1 mt-0.5"><AlertCircle className="h-3.5 w-3.5 flex-shrink-0" />{errors.full_name.message}</p>}
               </div>
-              {errors.full_name && (
-                <p className="form-error flex items-center text-xs mt-1">
-                  <AlertCircle className="h-3.5 w-3.5 mr-1 flex-shrink-0" />
-                  {errors.full_name.message}
-                </p>
-              )}
             </div>
 
             <div>
-              <label htmlFor="email" className="form-label text-sm">
-                Email Address <span className="text-danger-500">*</span>
-              </label>
+              <label htmlFor="email" className="auth-label">Email address <span className="text-red-500">*</span></label>
               <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                  <Mail className="h-5 w-5 text-gray-400" />
-                </div>
+                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
                 <input
                   id="email"
                   type="email"
                   {...register('email', {
-                    required: 'Email is required',
-                    pattern: {
-                      value: /^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i,
-                      message: 'Please enter a valid email address',
-                    },
+                    required: 'Email address is required',
+                    pattern: { value: /^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i, message: 'Please enter a valid email address' },
                   })}
-                  className={`form-input pl-10 py-2 text-sm ${errors.email ? 'border-danger-500' : ''}`}
-                  placeholder="Enter your email address"
+                  placeholder="you@company.com"
+                  className={`auth-input pl-9 ${errors.email ? 'auth-input-error' : ''}`}
                 />
+                {errors.email && <p className="auth-error-msg flex items-center gap-1 mt-0.5"><AlertCircle className="h-3.5 w-3.5 flex-shrink-0" />{errors.email.message}</p>}
               </div>
-              {errors.email && (
-                <p className="form-error flex items-center text-xs mt-1">
-                  <AlertCircle className="h-3.5 w-3.5 mr-1 flex-shrink-0" />
-                  {errors.email.message}
-                </p>
-              )}
             </div>
 
             <div>
-              <label htmlFor="workspace_name" className="form-label text-sm">
-                Workspace Name <span className="text-danger-500">*</span>
-              </label>
+              <label htmlFor="workspace_name" className="auth-label">Workspace name <span className="text-red-500">*</span></label>
               <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                  <Building2 className="h-5 w-5 text-gray-400" />
-                </div>
+                <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
                 <input
                   id="workspace_name"
                   type="text"
                   {...register('workspace_name', {
                     required: 'Workspace name is required',
-                    minLength: {
-                      value: 2,
-                      message: 'Workspace name must be at least 2 characters',
-                    },
-                    maxLength: {
-                      value: 100,
-                      message: 'Workspace name must not exceed 100 characters',
-                    },
-                    pattern: {
-                      value: /^[a-zA-Z0-9\s-]+$/,
-                      message: 'Workspace name can only contain letters, numbers, spaces, and hyphens',
-                    },
+                    minLength: { value: 2, message: 'Workspace name must be at least 2 characters' },
+                    maxLength: { value: 100, message: 'Workspace name must not exceed 100 characters' },
+                    pattern: { value: /^[a-zA-Z0-9\s-]+$/, message: 'Workspace name can only contain letters, numbers, spaces, and hyphens' },
                   })}
-                  className={`form-input pl-10 py-2 text-sm ${
-                    errors.workspace_name ? 'border-danger-500' : ''
-                  }`}
-                  placeholder="Enter your workspace name"
+                  placeholder="Your organization name"
+                  className={`auth-input pl-9 ${errors.workspace_name ? 'auth-input-error' : ''}`}
                 />
+                {errors.workspace_name && <p className="auth-error-msg flex items-center gap-1 mt-0.5"><AlertCircle className="h-3.5 w-3.5 flex-shrink-0" />{errors.workspace_name.message}</p>}
               </div>
-              {errors.workspace_name && (
-                <p className="form-error flex items-center text-xs mt-1">
-                  <AlertCircle className="h-3.5 w-3.5 mr-1 flex-shrink-0" />
-                  {errors.workspace_name.message}
-                </p>
-              )}
-              <p className="mt-0.5 text-xs text-gray-500">This will be your organization&apos;s name in the system</p>
+              <p className="mt-0.5 text-xs text-gray-500">This will be your organization&apos;s name in the system.</p>
             </div>
 
             <div>
-              <label htmlFor="password" className="form-label text-sm">
-                Password <span className="text-danger-500">*</span>
-              </label>
+              <label htmlFor="password" className="auth-label">Password <span className="text-red-500">*</span></label>
               <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                  <Lock className="h-5 w-5 text-gray-400" />
-                </div>
+                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
                 <input
                   id="password"
                   type={showPassword ? 'text' : 'password'}
@@ -331,40 +241,21 @@ const Register = () => {
                     minLength: { value: 6, message: 'Password must be at least 6 characters' },
                     maxLength: { value: 100, message: 'Password must not exceed 100 characters' },
                   })}
-                  className={`form-input pl-10 pr-10 py-2 text-sm ${
-                    errors.password ? 'border-danger-500' : ''
-                  }`}
-                  placeholder="Enter your password"
+                  placeholder="••••••••"
+                  className={`auth-input pl-9 pr-12 ${errors.password ? 'auth-input-error' : ''}`}
                 />
-                <button
-                  type="button"
-                  className="absolute inset-y-0 right-0 pr-3 flex items-center"
-                  onClick={() => setShowPassword(!showPassword)}
-                >
-                  {showPassword ? (
-                    <EyeOff className="h-5 w-5 text-gray-400 hover:text-gray-600" />
-                  ) : (
-                    <Eye className="h-5 w-5 text-gray-400 hover:text-gray-600" />
-                  )}
+                <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-primary-600 hover:text-primary-700" aria-label={showPassword ? 'Hide password' : 'Show password'}>
+                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </button>
+                {errors.password && <p className="auth-error-msg flex items-center gap-1 mt-0.5"><AlertCircle className="h-3.5 w-3.5 flex-shrink-0" />{errors.password.message}</p>}
               </div>
-              {errors.password && (
-                <p className="form-error flex items-center text-xs mt-1">
-                  <AlertCircle className="h-3.5 w-3.5 mr-1 flex-shrink-0" />
-                  {errors.password.message}
-                </p>
-              )}
-              <p className="mt-0.5 text-xs text-gray-500">Must be at least 6 characters long</p>
+              <p className="mt-0.5 text-xs text-gray-500">Must be at least 6 characters long.</p>
             </div>
 
             <div>
-              <label htmlFor="confirmPassword" className="form-label text-sm">
-                Confirm Password <span className="text-danger-500">*</span>
-              </label>
+              <label htmlFor="confirmPassword" className="auth-label">Confirm password <span className="text-red-500">*</span></label>
               <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                  <Lock className="h-5 w-5 text-gray-400" />
-                </div>
+                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
                 <input
                   id="confirmPassword"
                   type={showConfirmPassword ? 'text' : 'password'}
@@ -372,86 +263,43 @@ const Register = () => {
                     required: 'Please confirm your password',
                     validate: (value) => value === password || 'Passwords do not match',
                   })}
-                  className={`form-input pl-10 pr-10 py-2 text-sm ${
-                    errors.confirmPassword ? 'border-danger-500' : ''
-                  }`}
-                  placeholder="Confirm your password"
+                  placeholder="••••••••"
+                  className={`auth-input pl-9 pr-12 ${errors.confirmPassword ? 'auth-input-error' : ''}`}
                 />
-                <button
-                  type="button"
-                  className="absolute inset-y-0 right-0 pr-3 flex items-center"
-                  onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                >
-                  {showConfirmPassword ? (
-                    <EyeOff className="h-5 w-5 text-gray-400 hover:text-gray-600" />
-                  ) : (
-                    <Eye className="h-5 w-5 text-gray-400 hover:text-gray-600" />
-                  )}
+                <button type="button" onClick={() => setShowConfirmPassword(!showConfirmPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-primary-600 hover:text-primary-700" aria-label={showConfirmPassword ? 'Hide password' : 'Show password'}>
+                  {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </button>
+                {errors.confirmPassword && <p className="auth-error-msg flex items-center gap-1 mt-0.5"><AlertCircle className="h-3.5 w-3.5 flex-shrink-0" />{errors.confirmPassword.message}</p>}
               </div>
-              {errors.confirmPassword && (
-                <p className="form-error flex items-center text-xs mt-1">
-                  <AlertCircle className="h-3.5 w-3.5 mr-1 flex-shrink-0" />
-                  {errors.confirmPassword.message}
-                </p>
-              )}
             </div>
 
-            <div className="flex items-start">
+            <div className="flex items-start gap-2">
               <input
                 id="terms"
                 type="checkbox"
-                {...register('terms', {
-                  required: 'You must accept the terms and conditions',
-                })}
-                className="h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded mt-0.5"
+                {...register('terms', { required: 'You must accept the terms and conditions' })}
+                className="h-4 w-4 mt-0.5 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
               />
-              <label htmlFor="terms" className="ml-2 block text-xs text-gray-700">
-                I agree to the{' '}
-                <Link to="/terms" className="text-primary-600 hover:text-primary-500 underline">
-                  Terms &amp; Conditions
-                </Link>{' '}
-                and{' '}
-                <Link to="/privacy" className="text-primary-600 hover:text-primary-500 underline">
-                  Privacy Policy
-                </Link>
-                <span className="text-danger-500">*</span>
+              <label htmlFor="terms" className="text-xs text-gray-700">
+                I agree to the <Link to="/terms" className="auth-link underline">Terms &amp; Conditions</Link> and <Link to="/privacy" className="auth-link underline">Privacy Policy</Link> <span className="text-red-500">*</span>
               </label>
             </div>
-            {errors.terms && (
-              <p className="form-error flex items-center text-xs -mt-2">
-                <AlertCircle className="h-3.5 w-3.5 mr-1 flex-shrink-0" />
-                {errors.terms.message}
-              </p>
-            )}
+            {errors.terms && <p className="auth-error-msg flex items-center gap-1"><AlertCircle className="h-3.5 w-3.5 flex-shrink-0" />{errors.terms.message}</p>}
 
-            <div>
-              <button
-                type="submit"
-                disabled={isLoading}
-                className="w-full flex justify-center py-2.5 px-4 border border-transparent text-sm font-medium rounded-lg text-white bg-primary-600 hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
-              >
+            <div className="pt-1">
+              <button type="submit" disabled={isLoading} className="auth-btn-primary">
                 {isLoading ? (
-                  <div className="flex items-center">
-                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                    Creating account...
-                  </div>
+                  <><span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" /> Creating account...</>
                 ) : (
-                  'Create Account'
+                  'Create account'
                 )}
               </button>
             </div>
           </form>
-          </div>
 
-          <div className="mt-4 text-center">
-            <p className="text-sm text-gray-600">
-              Already have an account?{' '}
-              <Link to="/login" className="font-medium text-primary-600 hover:text-primary-500">
-                Sign in
-              </Link>
-            </p>
-          </div>
+          <p className="mt-4 text-center text-xs text-gray-600">
+            Already have an account? <Link to="/login" className="auth-link">Sign in</Link>
+          </p>
         </div>
       </div>
     </div>

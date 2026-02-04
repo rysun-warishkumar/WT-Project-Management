@@ -9,6 +9,8 @@ import Login from './pages/Auth/Login';
 import Register from './pages/Auth/Register';
 import VerifyEmail from './pages/Auth/VerifyEmail';
 import ResendVerification from './pages/Auth/ResendVerification';
+import ForgotPassword from './pages/Auth/ForgotPassword';
+import ResetPassword from './pages/Auth/ResetPassword';
 import Terms from './pages/Legal/Terms';
 import Privacy from './pages/Legal/Privacy';
 import MobileDeviceNotice from './components/Common/MobileDeviceNotice';
@@ -149,6 +151,22 @@ function App() {
                 element={
                   <PublicRoute>
                     <ResendVerification />
+                  </PublicRoute>
+                }
+              />
+              <Route
+                path="/forgot-password"
+                element={
+                  <PublicRoute>
+                    <ForgotPassword />
+                  </PublicRoute>
+                }
+              />
+              <Route
+                path="/reset-password"
+                element={
+                  <PublicRoute>
+                    <ResetPassword />
                   </PublicRoute>
                 }
               />

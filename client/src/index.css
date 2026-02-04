@@ -329,4 +329,259 @@
   .focus-visible {
     @apply focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2;
   }
+
+  /* Login page: entrance animations */
+  @keyframes loginSlideUp {
+    from {
+      opacity: 0;
+      transform: translateY(24px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  .login-card-enter {
+    animation: loginSlideUp 0.6s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  }
+  .login-form-item-1 { animation: loginSlideUp 0.5s cubic-bezier(0.22, 1, 0.36, 1) 0.1s both; }
+  .login-form-item-2 { animation: loginSlideUp 0.5s cubic-bezier(0.22, 1, 0.36, 1) 0.18s both; }
+  .login-form-item-3 { animation: loginSlideUp 0.5s cubic-bezier(0.22, 1, 0.36, 1) 0.26s both; }
+  .login-form-item-4 { animation: loginSlideUp 0.5s cubic-bezier(0.22, 1, 0.36, 1) 0.34s both; }
+  .login-form-item-5 { animation: loginSlideUp 0.5s cubic-bezier(0.22, 1, 0.36, 1) 0.42s both; }
+  .login-form-item-6 { animation: loginSlideUp 0.5s cubic-bezier(0.22, 1, 0.36, 1) 0.5s both; }
+  .login-form-item-7 { animation: loginSlideUp 0.5s cubic-bezier(0.22, 1, 0.36, 1) 0.58s both; }
+}
+
+/* ========== Auth pages (Login, Register, Forgot Password, Resend Verification, Reset Password) ========== */
+/* Use these classes for consistent layout. Tweak variables below to adjust blur, overlay, etc. */
+
+/* Smooth transition when switching between auth pages (e.g. Login → Register) */
+@keyframes authPageEnter {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.auth-page {
+  --auth-blur: 1px;
+  --auth-overlay-opacity: 0.5;
+  --auth-card-bg: rgba(255, 255, 255, 0.1);
+  --auth-card-blur: 24px;
+  --auth-panel-left-bg: rgba(30, 58, 138, var(--auth-overlay-opacity));
+  --auth-form-panel-bg: rgba(255, 255, 255, 0.95);
+  min-height: 100vh;
+  height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  position: relative;
+}
+
+.auth-page-bg {
+  position: absolute;
+  inset: 0;
+}
+
+.auth-page-bg img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform: scale(1.05);
+}
+
+.auth-page-overlay {
+  position: absolute;
+  inset: 0;
+  backdrop-filter: blur(var(--auth-blur));
+  -webkit-backdrop-filter: blur(var(--auth-blur));
+  background: rgba(30, 58, 138, var(--auth-overlay-opacity));
+}
+
+.auth-page-overlay-fallback {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to bottom right, #1e40af, #1e3a8a);
+}
+
+/* Card-only enter animation (use on any auth card, e.g. VerifyEmail inner card) */
+.auth-card-enter {
+  animation: authPageEnter 0.4s ease-out forwards;
+}
+
+/* Smooth transition on the card only when switching auth pages */
+.auth-glass-card {
+  position: relative;
+  z-index: 10;
+  width: 100%;
+  max-width: 56rem;
+  max-height: 90vh;
+  margin: 0 1rem;
+  display: flex;
+  flex-direction: column;
+  border-radius: 1rem;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+  background: var(--auth-card-bg);
+  backdrop-filter: blur(var(--auth-card-blur));
+  -webkit-backdrop-filter: blur(var(--auth-card-blur));
+  animation: authPageEnter 0.4s ease-out forwards;
+}
+
+@media (min-width: 768px) {
+  .auth-glass-card {
+    flex-direction: row;
+    overflow-y: auto;
+  }
+}
+
+.auth-panel-left {
+  flex: 0 0 40%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 1.5rem 1.5rem;
+  background: var(--auth-panel-left-bg);
+  border-right: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+@media (min-width: 768px) {
+  .auth-panel-left {
+    padding: 2rem 1.5rem;
+  }
+}
+
+.auth-footer-left {
+  margin-top: auto;
+  padding-top: 1.5rem;
+  text-align: center;
+  width: 100%;
+  font-size: 0.75rem;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.auth-footer-left span {
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.auth-form-panel {
+  flex: 1 1 60%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 1.25rem 1.5rem;
+  background: var(--auth-form-panel-bg);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border-left: 1px solid rgba(229, 231, 235, 0.5);
+}
+
+@media (min-width: 768px) {
+  .auth-form-panel {
+    padding: 1.5rem 1.5rem;
+    border-left-color: rgba(229, 231, 235, 0.8);
+  }
+}
+
+.auth-input {
+  display: block;
+  width: 100%;
+  padding: 0.625rem 0.75rem 0.625rem 2.25rem;
+  font-size: 0.875rem;
+  line-height: 1.25;
+  color: #111827;
+  background-color: #f9fafb;
+  border: 1px solid #d1d5db;
+  border-radius: 0.5rem;
+  transition: border-color 0.2s, box-shadow 0.2s, background-color 0.2s;
+}
+
+.auth-input::placeholder {
+  color: #9ca3af;
+}
+
+.auth-input:hover {
+  border-color: #9ca3af;
+}
+
+.auth-input:focus {
+  outline: none;
+  background-color: #fff;
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.3);
+}
+
+.auth-input-error {
+  border-color: #ef4444;
+}
+
+.auth-input-error:focus {
+  border-color: #ef4444;
+  box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.3);
+}
+
+.auth-btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.625rem 1rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #fff;
+  background-color: #2563eb;
+  border: none;
+  border-radius: 0.5rem;
+  box-shadow: 0 4px 6px -1px rgba(37, 99, 235, 0.25);
+  transition: background-color 0.2s, box-shadow 0.2s;
+}
+
+.auth-btn-primary:hover:not(:disabled) {
+  background-color: #1d4ed8;
+  box-shadow: 0 10px 15px -3px rgba(37, 99, 235, 0.3);
+}
+
+.auth-btn-primary:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px #fff, 0 0 0 4px #3b82f6;
+}
+
+.auth-btn-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.auth-link {
+  font-weight: 600;
+  color: #2563eb;
+  transition: color 0.2s;
+}
+
+.auth-link:hover {
+  color: #1d4ed8;
+}
+
+.auth-label {
+  display: block;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: #374151;
+  margin-bottom: 0.25rem;
+}
+
+.auth-error-msg {
+  margin-top: 0.25rem;
+  font-size: 0.75rem;
+  color: #dc2626;
 }

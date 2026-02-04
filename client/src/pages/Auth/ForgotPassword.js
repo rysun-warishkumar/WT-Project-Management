@@ -1,17 +1,16 @@
 import React, { useState } from 'react';
 import { useForm } from 'react-hook-form';
-import { Link, useNavigate } from 'react-router-dom';
-import { Mail, AlertCircle, CheckCircle, ArrowLeft, Shield } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { Mail, CheckCircle, ArrowLeft, Lock, Shield } from 'lucide-react';
 import { authAPI } from '../../services/api';
 import toast from 'react-hot-toast';
 
-const AUTH_BG_IMAGE = '/images/auth-panel2.jpg';
+const AUTH_BG_IMAGE = '/images/auth-forgot.jpg';
 
-const ResendVerification = () => {
+const ForgotPassword = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [emailSent, setEmailSent] = useState(false);
   const [bgImageError, setBgImageError] = useState(false);
-  const navigate = useNavigate();
 
   const {
     register,
@@ -22,25 +21,24 @@ const ResendVerification = () => {
   const onSubmit = async (data) => {
     setIsLoading(true);
     try {
-      const response = await authAPI.resendVerification(data.email.trim().toLowerCase());
+      const response = await authAPI.forgotPassword(data.email.trim().toLowerCase());
       if (response.data.success) {
         setEmailSent(true);
-        toast.success('Verification email sent! Please check your inbox.');
+        toast.success(response.data.message || 'If an account exists, you will receive a reset link shortly.');
       } else {
-        toast.error(response.data.message || 'Failed to send verification email');
+        toast.error(response.data.message || 'Something went wrong. Please try again.');
       }
     } catch (error) {
-      console.error('Resend verification error:', error);
-      if (error.response?.data?.errors?.length) {
+      const msg = error.response?.data?.message;
+      const status = error.response?.status;
+      if (status === 503) {
+        toast.error(msg || 'Password reset is not available at the moment. Please try again later.');
+      } else if (error.response?.data?.errors?.length) {
         (error.response.data.errors || []).forEach((err) => {
           toast.error(err.msg || err.message || 'Validation error');
         });
       } else {
-        toast.error(
-          error.response?.data?.message ||
-          'Failed to send verification email. Please try again.' ||
-          'An unexpected error occurred'
-        );
+        toast.error(msg || 'Something went wrong. Please try again.');
       }
     } finally {
       setIsLoading(false);
@@ -59,29 +57,22 @@ const ResendVerification = () => {
             <div className="inline-flex h-12 w-12 bg-success-100 rounded-full items-center justify-center mb-4">
               <CheckCircle className="h-6 w-6 text-success-600" />
             </div>
-            <h2 className="text-xl font-bold text-gray-900 mb-2">Email sent!</h2>
+            <h2 className="text-xl font-bold text-gray-900 mb-2">Check your email</h2>
             <p className="text-sm text-gray-600 mb-4">
-              We&apos;ve sent a new verification email to your inbox. Please check your email and click the verification link to activate your account.
+              If an account exists with that email, you will receive a password reset link shortly. Please check your inbox and spam folder.
             </p>
             <div className="bg-primary-50 border border-primary-200 rounded-lg p-4 mb-6">
               <p className="text-sm text-primary-800 font-medium">Didn&apos;t receive the email?</p>
-              <ul className="text-sm text-primary-700 mt-2 text-left list-disc list-inside space-y-1">
+              <ul className="text-sm text-primary-700 mt-2 list-disc list-inside space-y-1">
                 <li>Check your spam or junk folder</li>
-                <li>Wait a few minutes and check again</li>
+                <li>Wait a few minutes and try again</li>
                 <li>Make sure you entered the correct email address</li>
               </ul>
             </div>
-            <div className="space-y-3">
-              <button onClick={() => navigate('/login')} className="auth-btn-primary">
-                Go to Login
-              </button>
-              <button
-                onClick={() => setEmailSent(false)}
-                className="w-full py-2.5 px-4 rounded-lg text-sm font-medium text-gray-700 bg-white border-2 border-gray-200 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary-500/30 transition-all"
-              >
-                Send another email
-              </button>
-            </div>
+            <Link to="/login" className="inline-flex items-center text-sm font-medium auth-link">
+              <ArrowLeft className="h-4 w-4 mr-2" />
+              Back to Sign in
+            </Link>
           </div>
         </div>
       </div>
@@ -103,9 +94,9 @@ const ResendVerification = () => {
             </div>
             <span className="text-lg font-bold text-white tracking-tight">WT Project Management</span>
           </div>
-          <h1 className="text-2xl md:text-3xl font-bold text-white tracking-tight">Resend verification</h1>
+          <h1 className="text-2xl md:text-3xl font-bold text-white tracking-tight">Forgot your password?</h1>
           <p className="mt-2 text-sm md:text-base text-white/80 leading-snug">
-            Enter your email address to receive a new verification link and activate your account.
+            Enter your email address and we&apos;ll send you a link to reset your password.
           </p>
           <p className="auth-footer-left">
             Built with ❤️ by <span>W | Technology</span>
@@ -113,8 +104,8 @@ const ResendVerification = () => {
         </div>
 
         <div className="auth-form-panel">
-          <h2 className="text-lg font-semibold text-gray-900">Resend verification email</h2>
-          <p className="mt-0.5 text-xs text-gray-600">Enter your email address to receive a new verification link.</p>
+          <h2 className="text-lg font-semibold text-gray-900">Reset password</h2>
+          <p className="mt-0.5 text-xs text-gray-600">Enter your email address and we&apos;ll send you a reset link.</p>
 
           <form className="mt-4 space-y-3" onSubmit={handleSubmit(onSubmit)}>
             <div>
@@ -134,16 +125,15 @@ const ResendVerification = () => {
                   placeholder="you@company.com"
                   className={`auth-input pl-9 ${errors.email ? 'auth-input-error' : ''}`}
                 />
-                {errors.email && <p className="auth-error-msg flex items-center gap-1 mt-0.5"><AlertCircle className="h-3.5 w-3.5 flex-shrink-0" />{errors.email.message}</p>}
+                {errors.email && <p className="auth-error-msg">{errors.email.message}</p>}
               </div>
-              <p className="mt-0.5 text-xs text-gray-500">We&apos;ll send a new verification link to this email address.</p>
             </div>
 
             <button type="submit" disabled={isLoading} className="auth-btn-primary">
               {isLoading ? (
                 <><span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" /> Sending...</>
               ) : (
-                'Send verification email'
+                'Send reset link'
               )}
             </button>
           </form>
@@ -151,7 +141,7 @@ const ResendVerification = () => {
           <p className="mt-5 text-center text-sm text-gray-600">
             <Link to="/login" className="inline-flex items-center auth-link">
               <ArrowLeft className="h-4 w-4 mr-1" />
-              Back to Login
+              Back to Sign in
             </Link>
           </p>
         </div>
@@ -160,4 +150,4 @@ const ResendVerification = () => {
   );
 };
 
-export default ResendVerification;
+export default ForgotPassword;
