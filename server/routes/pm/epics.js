@@ -257,7 +257,55 @@ router.post('/', authorizePermission('projects', 'create'), [
       ]
     );
 
-    const epicId = result.insertId;
+    // Resolve epic id; when insertId is 0 (broken AUTO_INCREMENT on live), assign next id in DB and bump AUTO_INCREMENT
+    let epicId = result.insertId != null ? Number(result.insertId) : 0;
+    if (epicId <= 0) {
+      const maxRetries = 5;
+      let assigned = false;
+      for (let attempt = 0; attempt < maxRetries && !assigned; attempt++) {
+        const nextRows = await dbQuery(
+          'SELECT COALESCE(MAX(id), 0) + 1 AS next_id FROM pm_epics WHERE id > 0'
+        );
+        const nextId = nextRows && nextRows[0] ? Number(nextRows[0].next_id) : 1;
+        try {
+          const updateResult = await dbQuery(
+            'UPDATE pm_epics SET id = ? WHERE id = 0 AND reference_number = ? AND workspace_id = ? LIMIT 1',
+            [nextId, referenceNumber, workspace_id]
+          );
+          const affected = updateResult && typeof updateResult.affectedRows === 'number' ? updateResult.affectedRows : 0;
+          if (affected >= 1) {
+            epicId = nextId;
+            assigned = true;
+            try {
+              await dbQuery(
+                `ALTER TABLE pm_epics AUTO_INCREMENT = ${Number(nextId) + 1}`
+              );
+            } catch (alterErr) {
+              console.warn('Could not bump pm_epics AUTO_INCREMENT:', alterErr.message);
+            }
+            break;
+          }
+        } catch (err) {
+          if (err.code === 'ER_DUP_ENTRY') continue;
+          throw err;
+        }
+      }
+      if (!assigned) {
+        const createdRow = await dbQuery(
+          'SELECT id FROM pm_epics WHERE reference_number = ? AND workspace_id = ? ORDER BY id DESC LIMIT 1',
+          [referenceNumber, workspace_id]
+        );
+        if (createdRow && createdRow.length > 0) {
+          epicId = Number(createdRow[0].id);
+        }
+      }
+      if (!epicId || epicId <= 0) {
+        return res.status(500).json({
+          success: false,
+          message: 'Epic was created but could not be retrieved. Please refresh the list or try again.'
+        });
+      }
+    }
 
     // Log activity
     await logCreation(workspace_id, 'epic', epicId, userId, {
