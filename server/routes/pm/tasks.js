@@ -339,7 +339,55 @@ router.post('/', authorizePermission('projects', 'create'), [
       ]
     );
 
-    const taskId = result.insertId;
+    // Resolve task id; when insertId is 0 (broken AUTO_INCREMENT on live), assign next id in DB and bump AUTO_INCREMENT
+    let taskId = result.insertId != null ? Number(result.insertId) : 0;
+    if (taskId <= 0) {
+      const maxRetries = 5;
+      let assigned = false;
+      for (let attempt = 0; attempt < maxRetries && !assigned; attempt++) {
+        const nextRows = await dbQuery(
+          'SELECT COALESCE(MAX(id), 0) + 1 AS next_id FROM pm_tasks WHERE id > 0'
+        );
+        const nextId = nextRows && nextRows[0] ? Number(nextRows[0].next_id) : 1;
+        try {
+          const updateResult = await dbQuery(
+            'UPDATE pm_tasks SET id = ? WHERE id = 0 AND reference_number = ? AND user_story_id = ? LIMIT 1',
+            [nextId, referenceNumber, user_story_id]
+          );
+          const affected = updateResult && typeof updateResult.affectedRows === 'number' ? updateResult.affectedRows : 0;
+          if (affected >= 1) {
+            taskId = nextId;
+            assigned = true;
+            try {
+              await dbQuery(
+                `ALTER TABLE pm_tasks AUTO_INCREMENT = ${Number(nextId) + 1}`
+              );
+            } catch (alterErr) {
+              console.warn('Could not bump pm_tasks AUTO_INCREMENT:', alterErr.message);
+            }
+            break;
+          }
+        } catch (err) {
+          if (err.code === 'ER_DUP_ENTRY') continue;
+          throw err;
+        }
+      }
+      if (!assigned) {
+        const createdRow = await dbQuery(
+          'SELECT id FROM pm_tasks WHERE reference_number = ? AND user_story_id = ? ORDER BY id DESC LIMIT 1',
+          [referenceNumber, user_story_id]
+        );
+        if (createdRow && createdRow.length > 0) {
+          taskId = Number(createdRow[0].id);
+        }
+      }
+      if (!taskId || taskId <= 0) {
+        return res.status(500).json({
+          success: false,
+          message: 'Task was created but could not be retrieved. Please refresh the list or try again.'
+        });
+      }
+    }
 
     // Get created task
     const [task] = await dbQuery(
