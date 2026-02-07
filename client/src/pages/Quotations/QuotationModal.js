@@ -71,6 +71,16 @@ const QuotationModal = ({ isOpen, onClose, onSuccess, quotation }) => {
     name: 'items'
   });
 
+  // When opening edit from list, quotation has no items; fetch full quotation (same as detail page) so items show correctly
+  const needsFullQuotation = isOpen && !!quotation?.id && (!quotation?.items || quotation.items.length === 0);
+  const { data: fullQuotationData, isLoading: isLoadingFullQuotation } = useQuery(
+    ['quotation', quotation?.id],
+    () => quotationsAPI.getById(quotation.id),
+    { enabled: needsFullQuotation }
+  );
+  const fullQuotation = fullQuotationData?.data?.data;
+  const effectiveQuotation = fullQuotation || quotation;
+
   // Single source of truth: recalculate subtotal, tax (0 when empty), and total
   const recalculateTotals = () => {
     const items = getValues('items') || [];
@@ -110,24 +120,27 @@ const QuotationModal = ({ isOpen, onClose, onSuccess, quotation }) => {
     }
   });
 
-  // Reset form when quotation prop changes
+  // Reset form when effective quotation is available (from prop or from fetch when opened from list)
   useEffect(() => {
-    if (quotation) {
+    if (needsFullQuotation && !fullQuotation) {
+      return; // wait for full quotation fetch when opened from list
+    }
+    if (effectiveQuotation) {
       reset({
-        quote_number: quotation.quote_number || '',
-        client_id: quotation.client_id ? String(quotation.client_id) : '',
-        project_id: quotation.project_id ? String(quotation.project_id) : '',
-        quote_date: toDateOnly(quotation.quote_date) || new Date().toISOString().split('T')[0],
-        valid_till_date: toDateOnly(quotation.valid_till_date) || '',
-        status: quotation.status || 'draft',
-        subtotal: quotation.subtotal || 0,
-        tax_rate: quotation.tax_rate || 0,
-        tax_amount: quotation.tax_amount || 0,
-        total_amount: quotation.total_amount || 0,
-        currency: quotation.currency || 'USD',
-        notes: quotation.notes || '',
-        terms_conditions: quotation.terms_conditions || '',
-        items: quotation.items?.length > 0 ? quotation.items : [{ item_name: '', description: '', quantity: 1, unit_price: 0, total_price: 0 }]
+        quote_number: effectiveQuotation.quote_number || '',
+        client_id: effectiveQuotation.client_id ? String(effectiveQuotation.client_id) : '',
+        project_id: effectiveQuotation.project_id ? String(effectiveQuotation.project_id) : '',
+        quote_date: toDateOnly(effectiveQuotation.quote_date) || new Date().toISOString().split('T')[0],
+        valid_till_date: toDateOnly(effectiveQuotation.valid_till_date) || '',
+        status: effectiveQuotation.status || 'draft',
+        subtotal: effectiveQuotation.subtotal || 0,
+        tax_rate: effectiveQuotation.tax_rate || 0,
+        tax_amount: effectiveQuotation.tax_amount || 0,
+        total_amount: effectiveQuotation.total_amount || 0,
+        currency: effectiveQuotation.currency || 'USD',
+        notes: effectiveQuotation.notes || '',
+        terms_conditions: effectiveQuotation.terms_conditions || '',
+        items: effectiveQuotation.items?.length > 0 ? effectiveQuotation.items : [{ item_name: '', description: '', quantity: 1, unit_price: 0, total_price: 0 }]
       });
     } else {
       reset({
@@ -147,7 +160,7 @@ const QuotationModal = ({ isOpen, onClose, onSuccess, quotation }) => {
         items: [{ item_name: '', description: '', quantity: 1, unit_price: 0, total_price: 0 }]
       });
     }
-  }, [quotation, reset]);
+  }, [effectiveQuotation, fullQuotation, needsFullQuotation, reset]);
 
   // Client select: clear project when client changes
   const clientIdField = (() => {
@@ -161,11 +174,12 @@ const QuotationModal = ({ isOpen, onClose, onSuccess, quotation }) => {
     };
   })();
 
-  // Create/Update mutation
+  // Create/Update mutation (use effectiveQuotation.id when editing so list-edit works after fetch)
   const mutation = useMutation(
     (data) => {
-      if (quotation) {
-        return quotationsAPI.update(quotation.id, data);
+      const quoteId = effectiveQuotation?.id || quotation?.id;
+      if (quoteId) {
+        return quotationsAPI.update(quoteId, data);
       } else {
         return quotationsAPI.create(data);
       }
@@ -226,6 +240,9 @@ const QuotationModal = ({ isOpen, onClose, onSuccess, quotation }) => {
 
   if (!isOpen) return null;
 
+  const showForm = !needsFullQuotation || fullQuotation;
+  const showLoading = needsFullQuotation && isLoadingFullQuotation;
+
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
       <div className="bg-white rounded-lg shadow-xl w-full max-w-4xl max-h-[90vh] overflow-y-auto">
@@ -241,6 +258,14 @@ const QuotationModal = ({ isOpen, onClose, onSuccess, quotation }) => {
           </button>
         </div>
 
+        {showLoading && (
+          <div className="p-12 text-center text-gray-500">
+            <div className="inline-block h-8 w-8 animate-spin rounded-full border-2 border-primary-500 border-t-transparent" />
+            <p className="mt-3">Loading quotation details…</p>
+          </div>
+        )}
+
+        {showForm && (
         <form onSubmit={handleSubmit(onSubmit)} className="p-6 space-y-6">
           {/* Basic Information */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -537,6 +562,7 @@ const QuotationModal = ({ isOpen, onClose, onSuccess, quotation }) => {
             </button>
           </div>
         </form>
+        )}
       </div>
     </div>
   );

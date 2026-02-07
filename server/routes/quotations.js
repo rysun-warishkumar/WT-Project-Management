@@ -227,12 +227,31 @@ router.get('/', authorizePermission('quotations', 'view'), [
   }
 });
 
+// Reject invalid ids (e.g. 0) so we never return or modify another workspace's record
+const parseQuotationId = (idParam) => {
+  const n = parseInt(idParam, 10);
+  if (Number.isNaN(n) || n < 1) return null;
+  return n;
+};
+
 // Get quotation by ID
 router.get('/:id', authorizePermission('quotations', 'view'), async (req, res) => {
   try {
-    const quotationId = req.params.id;
+    const quotationId = parseQuotationId(req.params.id);
+    if (quotationId === null) {
+      return res.status(404).json({
+        success: false,
+        message: 'Quotation not found'
+      });
+    }
 
     const ws = getWorkspaceFilter(req, 'q', 'workspace_id');
+    if (!ws.whereClause && !req.isSuperAdmin) {
+      return res.status(403).json({
+        success: false,
+        message: 'Workspace context required to view a quotation'
+      });
+    }
     const quotations = await dbQuery(
       `SELECT 
         q.*,
@@ -260,6 +279,7 @@ router.get('/:id', authorizePermission('quotations', 'view'), async (req, res) =
     }
 
     const quotation = quotations[0];
+    const resolvedQuotationId = quotation.id;
 
     // Check if client user can access this quotation's data
     if (!canAccessClientData(req, quotation.client_id)) {
@@ -269,18 +289,19 @@ router.get('/:id', authorizePermission('quotations', 'view'), async (req, res) =
       });
     }
 
-    // Get quotation items
+    // Get quotation items (scope by resolved quotation id so we only get items for this workspace's quotation)
     const items = await dbQuery(
       'SELECT * FROM quotation_items WHERE quotation_id = ? ORDER BY id',
-      [quotationId]
+      [resolvedQuotationId]
     );
 
-    // Get related invoices
+    // Get related invoices (same workspace)
     let invoices = [];
     try {
+      const invWs = getWorkspaceFilter(req, '', 'workspace_id');
       const invoiceResult = await dbQuery(
-        `SELECT * FROM invoices WHERE quotation_id = ? ${getWorkspaceFilter(req, '', 'workspace_id').whereClause} ORDER BY created_at DESC`,
-        [quotationId, ...getWorkspaceFilter(req, '', 'workspace_id').whereParams]
+        `SELECT * FROM invoices WHERE quotation_id = ? ${invWs.whereClause} ORDER BY created_at DESC`,
+        [resolvedQuotationId, ...invWs.whereParams]
       );
       invoices = invoiceResult;
     } catch (error) {
@@ -413,7 +434,41 @@ router.post('/', authorizePermission('quotations', 'create'), validateQuotation,
       ]
     );
 
-    const quotationId = result.insertId;
+    let quotationId = result.insertId != null ? Number(result.insertId) : 0;
+    if (quotationId <= 0) {
+      const nextRows = await dbQuery(
+        'SELECT COALESCE(MAX(id), 0) + 1 AS next_id FROM quotations WHERE id > 0'
+      );
+      const nextId = nextRows && nextRows[0] ? Number(nextRows[0].next_id) : 1;
+      try {
+        const updateResult = await dbQuery(
+          'UPDATE quotations SET id = ? WHERE id = 0 AND workspace_id = ? AND quote_number = ? LIMIT 1',
+          [nextId, workspaceId, finalQuoteNumber]
+        );
+        if (updateResult && updateResult.affectedRows >= 1) {
+          quotationId = nextId;
+          try {
+            await dbQuery(`ALTER TABLE quotations AUTO_INCREMENT = ${Number(nextId) + 1}`);
+          } catch (alterErr) {
+            console.warn('Could not bump quotations AUTO_INCREMENT:', alterErr.message);
+          }
+        }
+      } catch (err) {
+        if (err.code === 'ER_DUP_ENTRY') {
+          const created = await dbQuery(
+            'SELECT id FROM quotations WHERE workspace_id = ? AND quote_number = ? ORDER BY id DESC LIMIT 1',
+            [workspaceId, finalQuoteNumber]
+          );
+          if (created && created[0]) quotationId = Number(created[0].id);
+        } else throw err;
+      }
+      if (!quotationId || quotationId <= 0) {
+        return res.status(500).json({
+          success: false,
+          message: 'Quotation was created but could not be retrieved. Please refresh the list or try again.'
+        });
+      }
+    }
 
     // Insert quotation items
     if (items && items.length > 0) {
@@ -486,7 +541,13 @@ router.put('/:id', authorizePermission('quotations', 'edit'), validateQuotation,
       });
     }
 
-    const quotationId = req.params.id;
+    const quotationId = parseQuotationId(req.params.id);
+    if (quotationId === null) {
+      return res.status(404).json({
+        success: false,
+        message: 'Quotation not found'
+      });
+    }
     const {
       quote_number,
       client_id,
@@ -638,7 +699,13 @@ router.put('/:id', authorizePermission('quotations', 'edit'), validateQuotation,
 // Delete quotation
 router.delete('/:id', authorizePermission('quotations', 'delete'), async (req, res) => {
   try {
-    const quotationId = req.params.id;
+    const quotationId = parseQuotationId(req.params.id);
+    if (quotationId === null) {
+      return res.status(404).json({
+        success: false,
+        message: 'Quotation not found'
+      });
+    }
 
     // Check if quotation exists
     const wsDel = getWorkspaceFilter(req, '', 'workspace_id');
@@ -689,7 +756,13 @@ router.delete('/:id', authorizePermission('quotations', 'delete'), async (req, r
 // Convert quotation to invoice
 router.post('/:id/convert-to-invoice', authorizePermission('invoices', 'create'), async (req, res) => {
   try {
-    const quotationId = req.params.id;
+    const quotationId = parseQuotationId(req.params.id);
+    if (quotationId === null) {
+      return res.status(404).json({
+        success: false,
+        message: 'Quotation not found'
+      });
+    }
     const { invoice_date: bodyInvoiceDate, due_date: bodyDueDate, payment_terms } = req.body || {};
 
     // Default invoice_date to today, due_date to today + 30 days if not provided (NOT NULL columns)

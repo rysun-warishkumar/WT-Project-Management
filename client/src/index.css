@@ -580,8 +580,14 @@
   margin-bottom: 0.25rem;
 }
 
+/* Keep error message outside the input+icon wrapper so icon alignment is not broken */
+.auth-input-wrap {
+  position: relative;
+  display: block;
+}
 .auth-error-msg {
   margin-top: 0.25rem;
   font-size: 0.75rem;
   color: #dc2626;
+  display: block;
 }

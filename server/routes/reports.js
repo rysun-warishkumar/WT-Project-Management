@@ -143,12 +143,13 @@ router.get('/financial', authorizePermission('reports', 'view'), validateReportP
       LIMIT 10
     `, revenueByClientParams);
 
-    // Get payment history (if payments table exists)
+    // Get payment history scoped by workspace (join invoices so we only include payments for this workspace's invoices)
     let paymentHistory = [];
     try {
-      const paymentParams = [];
+      const paymentWs = getWorkspaceFilter(req, 'i', 'workspace_id');
       let paymentWhere = 'WHERE 1=1';
-      
+      const paymentParams = [...paymentWs.whereParams];
+
       if (start_date) {
         paymentWhere += ' AND p.payment_date >= ?';
         paymentParams.push(start_date);
@@ -157,13 +158,14 @@ router.get('/financial', authorizePermission('reports', 'view'), validateReportP
         paymentWhere += ' AND p.payment_date <= ?';
         paymentParams.push(end_date);
       }
-      
+
       paymentHistory = await dbQuery(`
         SELECT 
           DATE_FORMAT(p.payment_date, '%Y-%m-%d') as payment_date,
           COUNT(*) as payment_count,
           SUM(p.amount) as total_amount
         FROM payments p
+        INNER JOIN invoices i ON p.invoice_id = i.id ${paymentWs.whereClause}
         ${paymentWhere}
         GROUP BY DATE_FORMAT(p.payment_date, '%Y-%m-%d')
         ORDER BY payment_date DESC

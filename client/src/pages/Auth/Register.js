@@ -172,58 +172,64 @@ const Register = () => {
           <form className="mt-4 space-y-3" onSubmit={handleSubmit(onSubmit)}>
             <div>
               <label htmlFor="full_name" className="auth-label">Full name <span className="text-red-500">*</span></label>
-              <div className="relative">
-                <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
-                <input
-                  id="full_name"
-                  type="text"
-                  {...register('full_name', {
-                    required: 'Full name is required',
-                    minLength: { value: 2, message: 'Full name must be at least 2 characters' },
-                    maxLength: { value: 100, message: 'Full name must not exceed 100 characters' },
-                    pattern: { value: /^[a-zA-Z\s'-]+$/, message: 'Full name can only contain letters, spaces, hyphens, and apostrophes' },
-                  })}
-                  placeholder="Enter your full name"
-                  className={`auth-input pl-9 ${errors.full_name ? 'auth-input-error' : ''}`}
-                />
+              <div className="auth-input-wrap">
+                <div className="relative">
+                  <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
+                  <input
+                    id="full_name"
+                    type="text"
+                    {...register('full_name', {
+                      required: 'Full name is required',
+                      minLength: { value: 2, message: 'Full name must be at least 2 characters' },
+                      maxLength: { value: 100, message: 'Full name must not exceed 100 characters' },
+                      pattern: { value: /^[a-zA-Z\s'-]+$/, message: 'Full name can only contain letters, spaces, hyphens, and apostrophes' },
+                    })}
+                    placeholder="Enter your full name"
+                    className={`auth-input pl-9 ${errors.full_name ? 'auth-input-error' : ''}`}
+                  />
+                </div>
                 {errors.full_name && <p className="auth-error-msg flex items-center gap-1 mt-0.5"><AlertCircle className="h-3.5 w-3.5 flex-shrink-0" />{errors.full_name.message}</p>}
               </div>
             </div>
 
             <div>
               <label htmlFor="email" className="auth-label">Email address <span className="text-red-500">*</span></label>
-              <div className="relative">
-                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
-                <input
-                  id="email"
-                  type="email"
-                  {...register('email', {
-                    required: 'Email address is required',
-                    pattern: { value: /^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i, message: 'Please enter a valid email address' },
-                  })}
-                  placeholder="you@company.com"
-                  className={`auth-input pl-9 ${errors.email ? 'auth-input-error' : ''}`}
-                />
+              <div className="auth-input-wrap">
+                <div className="relative">
+                  <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
+                  <input
+                    id="email"
+                    type="email"
+                    {...register('email', {
+                      required: 'Email address is required',
+                      pattern: { value: /^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i, message: 'Please enter a valid email address' },
+                    })}
+                    placeholder="you@company.com"
+                    className={`auth-input pl-9 ${errors.email ? 'auth-input-error' : ''}`}
+                  />
+                </div>
                 {errors.email && <p className="auth-error-msg flex items-center gap-1 mt-0.5"><AlertCircle className="h-3.5 w-3.5 flex-shrink-0" />{errors.email.message}</p>}
               </div>
             </div>
 
             <div>
               <label htmlFor="workspace_name" className="auth-label">Workspace name <span className="text-red-500">*</span></label>
-              <div className="relative">
-                <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
-                <input
-                  id="workspace_name"
-                  type="text"
-                  {...register('workspace_name', {
-                    required: 'Workspace name is required',
-                    minLength: { value: 2, message: 'Workspace name must be at least 2 characters' },
-                    maxLength: { value: 100, message: 'Workspace name must not exceed 100 characters' },
-                    pattern: { value: /^[a-zA-Z0-9\s-]+$/, message: 'Workspace name can only contain letters, numbers, spaces, and hyphens' },
-                  })}
-                  placeholder="Your organization name"
-                  className={`auth-input pl-9 ${errors.workspace_name ? 'auth-input-error' : ''}`}
-                />
+              <div className="auth-input-wrap">
+                <div className="relative">
+                  <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
+                  <input
+                    id="workspace_name"
+                    type="text"
+                    {...register('workspace_name', {
+                      required: 'Workspace name is required',
+                      minLength: { value: 2, message: 'Workspace name must be at least 2 characters' },
+                      maxLength: { value: 100, message: 'Workspace name must not exceed 100 characters' },
+                      pattern: { value: /^[a-zA-Z0-9\s-]+$/, message: 'Workspace name can only contain letters, numbers, spaces, and hyphens' },
+                    })}
+                    placeholder="Your organization name"
+                    className={`auth-input pl-9 ${errors.workspace_name ? 'auth-input-error' : ''}`}
+                  />
+                </div>
                 {errors.workspace_name && <p className="auth-error-msg flex items-center gap-1 mt-0.5"><AlertCircle className="h-3.5 w-3.5 flex-shrink-0" />{errors.workspace_name.message}</p>}
               </div>
               <p className="mt-0.5 text-xs text-gray-500">This will be your organization&apos;s name in the system.</p>
@@ -231,22 +237,24 @@ const Register = () => {
 
             <div>
               <label htmlFor="password" className="auth-label">Password <span className="text-red-500">*</span></label>
-              <div className="relative">
-                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
-                <input
-                  id="password"
-                  type={showPassword ? 'text' : 'password'}
-                  {...register('password', {
-                    required: 'Password is required',
-                    minLength: { value: 6, message: 'Password must be at least 6 characters' },
-                    maxLength: { value: 100, message: 'Password must not exceed 100 characters' },
-                  })}
-                  placeholder="••••••••"
-                  className={`auth-input pl-9 pr-12 ${errors.password ? 'auth-input-error' : ''}`}
-                />
-                <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-primary-600 hover:text-primary-700" aria-label={showPassword ? 'Hide password' : 'Show password'}>
-                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </button>
+              <div className="auth-input-wrap">
+                <div className="relative">
+                  <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
+                  <input
+                    id="password"
+                    type={showPassword ? 'text' : 'password'}
+                    {...register('password', {
+                      required: 'Password is required',
+                      minLength: { value: 6, message: 'Password must be at least 6 characters' },
+                      maxLength: { value: 100, message: 'Password must not exceed 100 characters' },
+                    })}
+                    placeholder="••••••••"
+                    className={`auth-input pl-9 pr-12 ${errors.password ? 'auth-input-error' : ''}`}
+                  />
+                  <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-primary-600 hover:text-primary-700" aria-label={showPassword ? 'Hide password' : 'Show password'}>
+                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
                 {errors.password && <p className="auth-error-msg flex items-center gap-1 mt-0.5"><AlertCircle className="h-3.5 w-3.5 flex-shrink-0" />{errors.password.message}</p>}
               </div>
               <p className="mt-0.5 text-xs text-gray-500">Must be at least 6 characters long.</p>
@@ -254,21 +262,23 @@ const Register = () => {
 
             <div>
               <label htmlFor="confirmPassword" className="auth-label">Confirm password <span className="text-red-500">*</span></label>
-              <div className="relative">
-                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
-                <input
-                  id="confirmPassword"
-                  type={showConfirmPassword ? 'text' : 'password'}
-                  {...register('confirmPassword', {
-                    required: 'Please confirm your password',
-                    validate: (value) => value === password || 'Passwords do not match',
-                  })}
-                  placeholder="••••••••"
-                  className={`auth-input pl-9 pr-12 ${errors.confirmPassword ? 'auth-input-error' : ''}`}
-                />
-                <button type="button" onClick={() => setShowConfirmPassword(!showConfirmPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-primary-600 hover:text-primary-700" aria-label={showConfirmPassword ? 'Hide password' : 'Show password'}>
-                  {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </button>
+              <div className="auth-input-wrap">
+                <div className="relative">
+                  <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
+                  <input
+                    id="confirmPassword"
+                    type={showConfirmPassword ? 'text' : 'password'}
+                    {...register('confirmPassword', {
+                      required: 'Please confirm your password',
+                      validate: (value) => value === password || 'Passwords do not match',
+                    })}
+                    placeholder="••••••••"
+                    className={`auth-input pl-9 pr-12 ${errors.confirmPassword ? 'auth-input-error' : ''}`}
+                  />
+                  <button type="button" onClick={() => setShowConfirmPassword(!showConfirmPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-primary-600 hover:text-primary-700" aria-label={showConfirmPassword ? 'Hide password' : 'Show password'}>
+                    {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
                 {errors.confirmPassword && <p className="auth-error-msg flex items-center gap-1 mt-0.5"><AlertCircle className="h-3.5 w-3.5 flex-shrink-0" />{errors.confirmPassword.message}</p>}
               </div>
             </div>

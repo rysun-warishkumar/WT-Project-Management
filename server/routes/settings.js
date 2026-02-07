@@ -5,6 +5,18 @@ const { authenticateToken, authorizePermission } = require('../middleware/auth')
 
 const router = express.Router();
 
+// Helper: get current workspace id for the user (for workspace-scoped settings)
+const getWorkspaceId = (req) => req.user.workspaceId || req.user.workspace_id || (req.user.workspace && req.user.workspace.id) || null;
+
+// Helper: user is workspace administrator (can edit workspace invoice-from settings)
+const canEditWorkspaceInvoiceFrom = (req) => {
+  if (req.user.is_super_admin || req.user.isSuperAdmin) return true;
+  if (req.user.role === 'admin') return true;
+  const ws = req.user.workspace;
+  if (ws && (ws.owner_id === req.user.id || ws.workspace_role === 'admin')) return true;
+  return false;
+};
+
 const superAdminOnly = (req, res, next) => {
   if (!req.user) {
     return res.status(401).json({ success: false, message: 'Authentication required' });
@@ -224,6 +236,115 @@ router.put('/smtp', authorizePermission('settings', 'edit'), [
       message: 'Failed to update SMTP settings',
       error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
+  }
+});
+
+// Get workspace invoice "From" details (for invoice PDF). Any workspace member can view.
+router.get('/workspace-invoice-from', authenticateToken, async (req, res) => {
+  try {
+    const workspaceId = getWorkspaceId(req);
+    if (!workspaceId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Workspace context required. Please ensure you are in a workspace.',
+      });
+    }
+    const rows = await query(
+      `SELECT id, name, invoice_from_name, invoice_from_email, invoice_from_phone, invoice_from_address 
+       FROM workspaces 
+       WHERE id = ?`,
+      [workspaceId]
+    );
+    if (rows.length === 0) {
+      return res.status(404).json({ success: false, message: 'Workspace not found' });
+    }
+    const w = rows[0];
+    const canEdit = canEditWorkspaceInvoiceFrom(req);
+    res.json({
+      success: true,
+      data: {
+        workspace_name: w.name,
+        invoice_from_name: w.invoice_from_name || '',
+        invoice_from_email: w.invoice_from_email || '',
+        invoice_from_phone: w.invoice_from_phone || '',
+        invoice_from_address: w.invoice_from_address || '',
+        can_edit: canEdit,
+      },
+    });
+  } catch (err) {
+    if (err.code === 'ER_BAD_FIELD_ERROR') {
+      return res.status(501).json({
+        success: false,
+        message: 'Invoice From settings are not available. Please run the workspace migration (008_workspace_invoice_from.sql).',
+      });
+    }
+    console.error('Get workspace invoice-from error:', err);
+    res.status(500).json({ success: false, message: 'Failed to load settings' });
+  }
+});
+
+// Update workspace invoice "From" details. Only workspace administrators can update.
+router.put('/workspace-invoice-from', authenticateToken, [
+  body('invoice_from_name').optional().trim().isLength({ max: 255 }).withMessage('Name must be at most 255 characters'),
+  body('invoice_from_email').optional().trim().isLength({ max: 255 }).withMessage('Email must be at most 255 characters'),
+  body('invoice_from_phone').optional().trim().isLength({ max: 100 }).withMessage('Phone must be at most 100 characters'),
+  body('invoice_from_address').optional().trim().isLength({ max: 2000 }).withMessage('Address must be at most 2000 characters'),
+], async (req, res) => {
+  try {
+    if (!canEditWorkspaceInvoiceFrom(req)) {
+      return res.status(403).json({
+        success: false,
+        message: 'Only workspace administrators can update Invoice From details.',
+      });
+    }
+    const workspaceId = getWorkspaceId(req);
+    if (!workspaceId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Workspace context required.',
+      });
+    }
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Validation error',
+        errors: errors.array(),
+      });
+    }
+    const { invoice_from_name, invoice_from_email, invoice_from_phone, invoice_from_address } = req.body;
+    await query(
+      `UPDATE workspaces 
+       SET invoice_from_name = ?, invoice_from_email = ?, invoice_from_phone = ?, invoice_from_address = ?,
+           updated_at = NOW()
+       WHERE id = ?`,
+      [
+        invoice_from_name != null ? String(invoice_from_name).trim() : null,
+        invoice_from_email != null ? String(invoice_from_email).trim() || null : null,
+        invoice_from_phone != null ? String(invoice_from_phone).trim() || null : null,
+        invoice_from_address != null ? String(invoice_from_address).trim() || null : null,
+        workspaceId,
+      ]
+    );
+    res.json({
+      success: true,
+      message: 'Invoice From details updated successfully',
+      data: {
+        invoice_from_name: invoice_from_name != null ? String(invoice_from_name).trim() : '',
+        invoice_from_email: invoice_from_email != null ? String(invoice_from_email).trim() : '',
+        invoice_from_phone: invoice_from_phone != null ? String(invoice_from_phone).trim() : '',
+        invoice_from_address: invoice_from_address != null ? String(invoice_from_address).trim() : '',
+      },
+    });
+  } catch (err) {
+    if (err.code === 'ER_BAD_FIELD_ERROR') {
+      return res.status(501).json({
+        success: false,
+        message: 'Invoice From settings are not available. Please run the workspace migration (008_workspace_invoice_from.sql).',
+      });
+    }
+    console.error('Update workspace invoice-from error:', err);
+    res.status(500).json({ success: false, message: 'Failed to update settings' });
   }
 });
 

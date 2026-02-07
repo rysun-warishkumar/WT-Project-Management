@@ -280,12 +280,31 @@ router.get('/', authorizePermission('invoices', 'view'), [
   }
 });
 
+// Reject invalid ids (e.g. 0) so we never return or modify another workspace's record
+const parseInvoiceId = (idParam) => {
+  const n = parseInt(idParam, 10);
+  if (Number.isNaN(n) || n < 1) return null;
+  return n;
+};
+
 // Get invoice by ID
 router.get('/:id', authorizePermission('invoices', 'view'), async (req, res) => {
   try {
-    const invoiceId = req.params.id;
+    const invoiceId = parseInvoiceId(req.params.id);
+    if (invoiceId === null) {
+      return res.status(404).json({
+        success: false,
+        message: 'Invoice not found'
+      });
+    }
 
     const ws = getWorkspaceFilter(req, 'i', 'workspace_id');
+    if (!ws.whereClause && !req.isSuperAdmin) {
+      return res.status(403).json({
+        success: false,
+        message: 'Workspace context required to view an invoice'
+      });
+    }
     const invoices = await dbQuery(
       `SELECT 
         i.*,
@@ -316,6 +335,7 @@ router.get('/:id', authorizePermission('invoices', 'view'), async (req, res) => 
     }
 
     const invoice = invoices[0];
+    const resolvedInvoiceId = invoice.id;
 
     // Check if client user can access this invoice's data
     if (!canAccessClientData(req, invoice.client_id)) {
@@ -325,18 +345,18 @@ router.get('/:id', authorizePermission('invoices', 'view'), async (req, res) => 
       });
     }
 
-    // Get invoice items
+    // Get invoice items (scope by resolved invoice id)
     const items = await dbQuery(
       'SELECT * FROM invoice_items WHERE invoice_id = ? ORDER BY id',
-      [invoiceId]
+      [resolvedInvoiceId]
     );
 
-    // Get payment history
+    // Get payment history for this invoice only
     let payments = [];
     try {
       const paymentResult = await dbQuery(
         'SELECT * FROM payments WHERE invoice_id = ? ORDER BY payment_date DESC',
-        [invoiceId]
+        [resolvedInvoiceId]
       );
       payments = paymentResult;
     } catch (error) {
@@ -428,7 +448,7 @@ router.post('/', authorizePermission('invoices', 'create'), validateInvoice, asy
       }
     }
 
-    // Check if quotation exists (if provided)
+    // Check if quotation exists (if provided) and belongs to workspace
     if (quotation_id) {
       const wsQt = getWorkspaceFilter(req, '', 'workspace_id');
       const quotationCheck = await dbQuery(
@@ -437,17 +457,6 @@ router.post('/', authorizePermission('invoices', 'create'), validateInvoice, asy
       );
       if (quotationCheck.length === 0) {
         return res.status(400).json({ success: false, message: 'Quotation not found' });
-      }
-    }
-
-    // Check if quotation exists (if provided)
-    if (quotation_id) {
-      const quotationCheck = await dbQuery('SELECT id FROM quotations WHERE id = ?', [quotation_id]);
-      if (quotationCheck.length === 0) {
-        return res.status(400).json({
-          success: false,
-          message: 'Quotation not found'
-        });
       }
     }
 
@@ -479,7 +488,41 @@ router.post('/', authorizePermission('invoices', 'create'), validateInvoice, asy
       ]
     );
 
-    const invoiceId = result.insertId;
+    let invoiceId = result.insertId != null ? Number(result.insertId) : 0;
+    if (invoiceId <= 0) {
+      const nextRows = await dbQuery(
+        'SELECT COALESCE(MAX(id), 0) + 1 AS next_id FROM invoices WHERE id > 0'
+      );
+      const nextId = nextRows && nextRows[0] ? Number(nextRows[0].next_id) : 1;
+      try {
+        const updateResult = await dbQuery(
+          'UPDATE invoices SET id = ? WHERE id = 0 AND workspace_id = ? AND invoice_number = ? LIMIT 1',
+          [nextId, workspaceId, finalInvoiceNumber]
+        );
+        if (updateResult && updateResult.affectedRows >= 1) {
+          invoiceId = nextId;
+          try {
+            await dbQuery(`ALTER TABLE invoices AUTO_INCREMENT = ${Number(nextId) + 1}`);
+          } catch (alterErr) {
+            console.warn('Could not bump invoices AUTO_INCREMENT:', alterErr.message);
+          }
+        }
+      } catch (err) {
+        if (err.code === 'ER_DUP_ENTRY') {
+          const created = await dbQuery(
+            'SELECT id FROM invoices WHERE workspace_id = ? AND invoice_number = ? ORDER BY id DESC LIMIT 1',
+            [workspaceId, finalInvoiceNumber]
+          );
+          if (created && created[0]) invoiceId = Number(created[0].id);
+        } else throw err;
+      }
+      if (!invoiceId || invoiceId <= 0) {
+        return res.status(500).json({
+          success: false,
+          message: 'Invoice was created but could not be retrieved. Please refresh the list or try again.'
+        });
+      }
+    }
 
     // Insert invoice items
     if (items && items.length > 0) {
@@ -553,7 +596,13 @@ router.put('/:id', authorizePermission('invoices', 'edit'), validateInvoice, asy
       });
     }
 
-    const invoiceId = req.params.id;
+    const invoiceId = parseInvoiceId(req.params.id);
+    if (invoiceId === null) {
+      return res.status(404).json({
+        success: false,
+        message: 'Invoice not found'
+      });
+    }
     const {
       invoice_number,
       client_id,
@@ -738,7 +787,13 @@ router.post('/:id/payment', authorizePermission('invoices', 'record_payment'), [
       });
     }
 
-    const invoiceId = req.params.id;
+    const invoiceId = parseInvoiceId(req.params.id);
+    if (invoiceId === null) {
+      return res.status(404).json({
+        success: false,
+        message: 'Invoice not found'
+      });
+    }
     const {
       amount,
       payment_method,
@@ -877,7 +932,13 @@ router.post('/:id/payment', authorizePermission('invoices', 'record_payment'), [
 // Delete invoice
 router.delete('/:id', authorizePermission('invoices', 'delete'), async (req, res) => {
   try {
-    const invoiceId = req.params.id;
+    const invoiceId = parseInvoiceId(req.params.id);
+    if (invoiceId === null) {
+      return res.status(404).json({
+        success: false,
+        message: 'Invoice not found'
+      });
+    }
 
     // Check if invoice exists (scoped to workspace)
     const wsDel = getWorkspaceFilter(req, '', 'workspace_id');
@@ -987,7 +1048,13 @@ router.get('/stats/overview', authorizePermission('invoices', 'view'), async (re
 // Download invoice as PDF
 router.get('/:id/download', authorizePermission('invoices', 'view'), async (req, res) => {
   try {
-    const invoiceId = req.params.id;
+    const invoiceId = parseInvoiceId(req.params.id);
+    if (invoiceId === null) {
+      return res.status(404).json({
+        success: false,
+        message: 'Invoice not found'
+      });
+    }
     const PDFDocument = require('pdfkit');
 
     // Fetch invoice data
@@ -1032,6 +1099,40 @@ router.get('/:id/download', authorizePermission('invoices', 'view'), async (req,
         message: 'Access denied. You can only download invoices associated with your account.'
       });
     }
+
+    // Fetch workspace and optional invoice "From" details (workspace-isolated: invoice.workspace_id is already scoped)
+    let workspace = null;
+    if (invoice.workspace_id) {
+      try {
+        const wsRows = await dbQuery(
+          `SELECT id, name, invoice_from_name, invoice_from_email, invoice_from_phone, invoice_from_address 
+           FROM workspaces WHERE id = ?`,
+          [invoice.workspace_id]
+        );
+        if (wsRows.length > 0) workspace = wsRows[0];
+      } catch (wsErr) {
+        if (wsErr.code === 'ER_BAD_FIELD_ERROR') {
+          const fallback = await dbQuery('SELECT id, name FROM workspaces WHERE id = ?', [invoice.workspace_id]);
+          if (fallback.length > 0) workspace = fallback[0];
+        } else {
+          console.warn('Workspace fetch for PDF failed:', wsErr.message);
+        }
+      }
+    }
+    const hasConfiguredFrom = workspace && (
+      (workspace.invoice_from_name && String(workspace.invoice_from_name).trim()) ||
+      (workspace.invoice_from_email && String(workspace.invoice_from_email).trim()) ||
+      (workspace.invoice_from_phone && String(workspace.invoice_from_phone).trim()) ||
+      (workspace.invoice_from_address && String(workspace.invoice_from_address).trim())
+    );
+    const fromName = hasConfiguredFrom && workspace.invoice_from_name
+      ? String(workspace.invoice_from_name).trim()
+      : ((workspace && workspace.name) ? String(workspace.name) : (process.env.APP_NAME || 'Client Management System'));
+    const fromSubtext = hasConfiguredFrom ? null : ((workspace && workspace.name) ? 'Workspace' : 'System Administrator');
+    const fromEmail = (workspace && workspace.invoice_from_email) ? String(workspace.invoice_from_email).trim() : null;
+    const fromPhone = (workspace && workspace.invoice_from_phone) ? String(workspace.invoice_from_phone).trim() : null;
+    const fromAddress = (workspace && workspace.invoice_from_address) ? String(workspace.invoice_from_address).trim() : null;
+    const footerBrand = (workspace && workspace.name) ? String(workspace.name) : 'W | Technology';
 
     // Get invoice items
     const items = await dbQuery(
@@ -1113,15 +1214,34 @@ router.get('/:id/download', authorizePermission('invoices', 'view'), async (req,
       doc.text(`Due Date: ${new Date(invoice.due_date).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}`, contentRight, margin + 45, { width: headerBlockWidth, align: 'right' });
     };
 
-    // Helper function to add from/to section
+    // Helper function to add from/to section (uses workspace; when configured, uses invoice From details)
     const addFromToSection = (startY) => {
-      // From section
       doc.fontSize(9).fillColor('#6B7280').font('Helvetica-Bold');
       doc.text('FROM:', margin, startY);
       doc.fontSize(12).fillColor('#111827').font('Helvetica-Bold');
-      doc.text(process.env.APP_NAME || 'Client Management System', margin, startY + 14);
-      doc.fontSize(9).fillColor('#6B7280').font('Helvetica');
-      doc.text('System Administrator', margin, startY + 28);
+      doc.text(fromName, margin, startY + 14);
+      let fromY = startY + 28;
+      if (fromSubtext) {
+        doc.fontSize(9).fillColor('#6B7280').font('Helvetica');
+        doc.text(fromSubtext, margin, fromY);
+        fromY += 14;
+      }
+      if (fromEmail || fromPhone || fromAddress) {
+        doc.fontSize(9).fillColor('#6B7280').font('Helvetica');
+        if (fromEmail) {
+          doc.text(fromEmail, margin, fromY);
+          fromY += 14;
+        }
+        if (fromPhone) {
+          doc.text(fromPhone, margin, fromY);
+          fromY += 14;
+        }
+        if (fromAddress) {
+          const addrLines = doc.heightOfString(fromAddress, { width: 200 });
+          doc.text(fromAddress, margin, fromY, { width: 200 });
+          fromY += Math.max(14, addrLines);
+        }
+      }
       
       // To section (within content width)
       const toX = margin + 280;
@@ -1261,7 +1381,7 @@ router.get('/:id/download', authorizePermission('invoices', 'view'), async (req,
       doc.text(paymentMethods.join(', '), margin + 80, y);
     };
 
-    // Helper function to add footer
+    // Helper function to add footer (uses workspace when available)
     const addFooter = (pageNum, totalPages) => {
       const footerY = pageHeight - margin - 50;
       
@@ -1269,13 +1389,13 @@ router.get('/:id/download', authorizePermission('invoices', 'view'), async (req,
       doc.strokeColor('#E5E7EB').lineWidth(0.5);
       doc.moveTo(margin, footerY - 15).lineTo(pageWidth - margin, footerY - 15).stroke();
       
-      // Copyright and contact info
+      // Copyright and contact info – workspace name when available
       doc.fontSize(8).fillColor('#6B7280').font('Helvetica');
-      const copyrightText = `© ${new Date().getFullYear()} W | Technology. All rights reserved.`;
+      const copyrightText = `© ${new Date().getFullYear()} ${footerBrand}. All rights reserved.`;
       doc.text(copyrightText, margin, footerY - 10, { width: contentWidth, align: 'center' });
       
       doc.fontSize(7).fillColor('#9CA3AF').font('Helvetica');
-      const contactText = 'For any queries, please contact us at support@wtechnology.com or call +1 (555) 123-4567';
+      const contactText = 'For any queries, please contact your workspace administrator.';
       doc.text(contactText, margin, footerY, { width: contentWidth, align: 'center' });
       
       // Generation info

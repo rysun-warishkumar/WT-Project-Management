@@ -23,10 +23,12 @@ import {
   Settings as SettingsIcon,
   Send,
   Server,
+  FileText,
 } from 'lucide-react';
 import { settingsAPI } from '../../services/api';
+import { usePermissions } from '../../hooks/usePermissions';
 
-const VALID_TABS = ['profile', 'password', 'account', 'smtp'];
+const VALID_TABS = ['profile', 'password', 'account', 'invoice-from', 'smtp'];
 
 const Settings = () => {
   const { user, updateProfile, changePassword } = useAuth();
@@ -40,6 +42,7 @@ const Settings = () => {
     ? (tabFromUrl === 'smtp' && !isSuperAdmin ? 'profile' : tabFromUrl)
     : 'profile';
   const [activeTab, setActiveTab] = useState(initialTab);
+  const { isAdmin } = usePermissions();
 
   // Sync URL when tab changes (so refresh keeps the same tab)
   useEffect(() => {
@@ -114,6 +117,21 @@ const Settings = () => {
     },
   });
 
+  // Invoice From form (workspace-level; only admins can edit)
+  const {
+    register: registerInvoiceFrom,
+    handleSubmit: handleSubmitInvoiceFrom,
+    formState: { errors: invoiceFromFormErrors, isSubmitting: isSubmittingInvoiceFrom },
+    reset: resetInvoiceFrom,
+  } = useForm({
+    defaultValues: {
+      invoice_from_name: '',
+      invoice_from_email: '',
+      invoice_from_phone: '',
+      invoice_from_address: '',
+    },
+  });
+
   // Fetch user profile
   const { data: profileData, isLoading: isLoadingProfile } = useQuery(
     'userProfile',
@@ -134,6 +152,61 @@ const Settings = () => {
       },
     }
   );
+
+  // Fetch workspace invoice "From" details (for invoice PDF)
+  const { data: invoiceFromData, isLoading: isLoadingInvoiceFrom, refetch: refetchInvoiceFrom } = useQuery(
+    'workspaceInvoiceFrom',
+    async () => {
+      const response = await settingsAPI.getWorkspaceInvoiceFrom();
+      return response.data.data;
+    },
+    {
+      enabled: activeTab === 'invoice-from',
+      onSuccess: (data) => {
+        if (data) {
+          resetInvoiceFrom({
+            invoice_from_name: data.invoice_from_name || '',
+            invoice_from_email: data.invoice_from_email || '',
+            invoice_from_phone: data.invoice_from_phone || '',
+            invoice_from_address: data.invoice_from_address || '',
+          });
+        }
+      },
+      onError: (error) => {
+        if (error.response?.status !== 400 && error.response?.status !== 404) {
+          toast.error(error.response?.data?.message || 'Failed to load Invoice From settings');
+        }
+      },
+    }
+  );
+
+  const invoiceFromCanEdit = invoiceFromData?.can_edit ?? isAdmin;
+
+  const updateInvoiceFromMutation = useMutation(
+    async (data) => {
+      const response = await settingsAPI.updateWorkspaceInvoiceFrom(data);
+      return response.data;
+    },
+    {
+      onSuccess: () => {
+        refetchInvoiceFrom();
+        toast.success('Invoice From details updated successfully');
+      },
+      onError: (error) => {
+        toast.error(error.response?.data?.message || 'Failed to update Invoice From details');
+      },
+    }
+  );
+
+  const onSubmitInvoiceFrom = (data) => {
+    if (!invoiceFromCanEdit) return;
+    updateInvoiceFromMutation.mutate({
+      invoice_from_name: data.invoice_from_name?.trim() || '',
+      invoice_from_email: data.invoice_from_email?.trim() || '',
+      invoice_from_phone: data.invoice_from_phone?.trim() || '',
+      invoice_from_address: data.invoice_from_address?.trim() || '',
+    });
+  };
 
   // Fetch SMTP settings (super admin only – API also restricts)
   const { data: smtpData, isLoading: isLoadingSmtp, refetch: refetchSmtp } = useQuery(
@@ -480,6 +553,17 @@ const Settings = () => {
           >
             <Info className="inline-block h-4 w-4 mr-2 flex-shrink-0" />
             Account Information
+          </button>
+          <button
+            onClick={() => { setActiveTab('invoice-from'); setSearchParams({ tab: 'invoice-from' }, { replace: true }); }}
+            className={`inline-flex items-center px-3 py-2 text-xs sm:text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
+              activeTab === 'invoice-from'
+                ? 'border-primary-600 text-primary-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+            }`}
+          >
+            <FileText className="inline-block h-4 w-4 mr-2 flex-shrink-0" />
+            Invoice From
           </button>
           {isSuperAdmin && (
             <button
@@ -1009,6 +1093,124 @@ const Settings = () => {
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Invoice From Tab (workspace-level; only admins can edit) */}
+      {activeTab === 'invoice-from' && (
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 sm:p-6">
+          <div className="mb-6">
+            <h2 className="text-xl font-semibold text-gray-900">Invoice From Details</h2>
+            <p className="text-sm text-gray-600 mt-1">
+              These details appear in the &quot;From&quot; section when generating invoice PDFs. If not configured, only the workspace name is shown.
+            </p>
+          </div>
+
+          {isLoadingInvoiceFrom ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader className="h-8 w-8 animate-spin text-primary-600" />
+            </div>
+          ) : !invoiceFromData ? (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-6 text-center">
+              <Info className="mx-auto h-10 w-10 text-amber-600 mb-3" />
+              <p className="text-sm text-amber-800">
+                Unable to load settings. You may need to be in a workspace, or run the workspace migration (008_workspace_invoice_from.sql).
+              </p>
+            </div>
+          ) : (
+            <>
+              {!invoiceFromCanEdit && (
+                <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg flex items-start">
+                  <Info className="h-5 w-5 text-blue-600 mt-0.5 mr-2 flex-shrink-0" />
+                  <p className="text-sm text-blue-800">
+                    Only workspace administrators can edit these details. You can view the current values below.
+                  </p>
+                </div>
+              )}
+
+              <form onSubmit={handleSubmitInvoiceFrom(onSubmitInvoiceFrom)} className="space-y-6">
+                <div>
+                  <label htmlFor="invoice_from_name" className="block text-sm font-medium text-gray-700 mb-2">
+                    Name
+                  </label>
+                  <input
+                    type="text"
+                    id="invoice_from_name"
+                    {...registerInvoiceFrom('invoice_from_name', { maxLength: { value: 255, message: 'Max 255 characters' } })}
+                    className="form-input w-full"
+                    placeholder="e.g. Company or contact name"
+                    disabled={!invoiceFromCanEdit}
+                  />
+                  {invoiceFromFormErrors.invoice_from_name && (
+                    <p className="mt-1 text-sm text-red-600">{invoiceFromFormErrors.invoice_from_name.message}</p>
+                  )}
+                </div>
+                <div>
+                  <label htmlFor="invoice_from_email" className="block text-sm font-medium text-gray-700 mb-2">
+                    Email
+                  </label>
+                  <input
+                    type="email"
+                    id="invoice_from_email"
+                    {...registerInvoiceFrom('invoice_from_email', { maxLength: { value: 255, message: 'Max 255 characters' } })}
+                    className="form-input w-full"
+                    placeholder="billing@company.com"
+                    disabled={!invoiceFromCanEdit}
+                  />
+                  {invoiceFromFormErrors.invoice_from_email && (
+                    <p className="mt-1 text-sm text-red-600">{invoiceFromFormErrors.invoice_from_email.message}</p>
+                  )}
+                </div>
+                <div>
+                  <label htmlFor="invoice_from_phone" className="block text-sm font-medium text-gray-700 mb-2">
+                    Contact Number
+                  </label>
+                  <input
+                    type="text"
+                    id="invoice_from_phone"
+                    {...registerInvoiceFrom('invoice_from_phone', { maxLength: { value: 100, message: 'Max 100 characters' } })}
+                    className="form-input w-full"
+                    placeholder="+1 (555) 123-4567"
+                    disabled={!invoiceFromCanEdit}
+                  />
+                  {invoiceFromFormErrors.invoice_from_phone && (
+                    <p className="mt-1 text-sm text-red-600">{invoiceFromFormErrors.invoice_from_phone.message}</p>
+                  )}
+                </div>
+                <div>
+                  <label htmlFor="invoice_from_address" className="block text-sm font-medium text-gray-700 mb-2">
+                    Address
+                  </label>
+                  <textarea
+                    id="invoice_from_address"
+                    rows={3}
+                    {...registerInvoiceFrom('invoice_from_address', { maxLength: { value: 2000, message: 'Max 2000 characters' } })}
+                    className="form-input w-full"
+                    placeholder="Street, City, State, Postal code"
+                    disabled={!invoiceFromCanEdit}
+                  />
+                  {invoiceFromFormErrors.invoice_from_address && (
+                    <p className="mt-1 text-sm text-red-600">{invoiceFromFormErrors.invoice_from_address.message}</p>
+                  )}
+                </div>
+                {invoiceFromCanEdit && (
+                  <div className="flex items-center gap-3">
+                    <button
+                      type="submit"
+                      disabled={isSubmittingInvoiceFrom || updateInvoiceFromMutation.isLoading}
+                      className="btn btn-primary inline-flex items-center"
+                    >
+                      {updateInvoiceFromMutation.isLoading ? (
+                        <><Loader className="h-4 w-4 animate-spin mr-2" /> Saving...</>
+                      ) : (
+                        <><Save className="h-4 w-4 mr-2" /> Save Invoice From Details</>
+                      )}
+                    </button>
+                  </div>
+                )}
+              </form>
+            </>
+          )}
         </div>
       )}
 

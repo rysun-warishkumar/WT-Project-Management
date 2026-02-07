@@ -114,15 +114,17 @@ const Login = () => {
               <label htmlFor="username" className="auth-label">
                 Username or email
               </label>
-              <div className="relative group">
-                <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 group-focus-within:text-primary-600 pointer-events-none transition-colors" />
-                <input
-                  id="username"
-                  type="text"
-                  {...register('username', { required: 'Username or email is required' })}
-                  placeholder="you@company.com"
-                  className={`auth-input pl-9 pr-3 ${errors.username ? 'auth-input-error' : ''}`}
-                />
+              <div className="auth-input-wrap">
+                <div className="relative group">
+                  <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 group-focus-within:text-primary-600 pointer-events-none transition-colors" />
+                  <input
+                    id="username"
+                    type="text"
+                    {...register('username', { required: 'Username or email is required' })}
+                    placeholder="you@company.com"
+                    className={`auth-input pl-9 pr-3 ${errors.username ? 'auth-input-error' : ''}`}
+                  />
+                </div>
                 {errors.username && <p className="auth-error-msg">{errors.username.message}</p>}
               </div>
             </div>
@@ -131,26 +133,28 @@ const Login = () => {
               <label htmlFor="password" className="auth-label">
                 Password
               </label>
-              <div className="relative group">
-                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 group-focus-within:text-primary-600 pointer-events-none transition-colors" />
-                <input
-                  id="password"
-                  type={showPassword ? 'text' : 'password'}
-                  {...register('password', {
-                    required: 'Password is required',
-                    minLength: { value: 6, message: 'Password must be at least 6 characters' },
-                  })}
-                  placeholder="••••••••"
-                  className={`auth-input pl-9 pr-12 py-2.5 ${errors.password ? 'auth-input-error' : ''}`}
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-primary-600 hover:text-primary-700 transition-colors"
-                  aria-label={showPassword ? 'Hide password' : 'Show password'}
-                >
-                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </button>
+              <div className="auth-input-wrap">
+                <div className="relative group">
+                  <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 group-focus-within:text-primary-600 pointer-events-none transition-colors" />
+                  <input
+                    id="password"
+                    type={showPassword ? 'text' : 'password'}
+                    {...register('password', {
+                      required: 'Password is required',
+                      minLength: { value: 6, message: 'Password must be at least 6 characters' },
+                    })}
+                    placeholder="••••••••"
+                    className={`auth-input pl-9 pr-12 py-2.5 ${errors.password ? 'auth-input-error' : ''}`}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-primary-600 hover:text-primary-700 transition-colors"
+                    aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  >
+                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
                 {errors.password && <p className="auth-error-msg">{errors.password.message}</p>}
               </div>
             </div>

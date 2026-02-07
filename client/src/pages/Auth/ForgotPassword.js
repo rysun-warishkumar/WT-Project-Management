@@ -110,21 +110,23 @@ const ForgotPassword = () => {
           <form className="mt-4 space-y-3" onSubmit={handleSubmit(onSubmit)}>
             <div>
               <label htmlFor="email" className="auth-label">Email address <span className="text-red-500">*</span></label>
-              <div className="relative">
-                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
-                <input
-                  id="email"
-                  type="email"
-                  {...register('email', {
-                    required: 'Email address is required',
-                    pattern: {
-                      value: /^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i,
-                      message: 'Please enter a valid email address',
-                    },
-                  })}
-                  placeholder="you@company.com"
-                  className={`auth-input pl-9 ${errors.email ? 'auth-input-error' : ''}`}
-                />
+              <div className="auth-input-wrap">
+                <div className="relative">
+                  <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
+                  <input
+                    id="email"
+                    type="email"
+                    {...register('email', {
+                      required: 'Email address is required',
+                      pattern: {
+                        value: /^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i,
+                        message: 'Please enter a valid email address',
+                      },
+                    })}
+                    placeholder="you@company.com"
+                    className={`auth-input pl-9 ${errors.email ? 'auth-input-error' : ''}`}
+                  />
+                </div>
                 {errors.email && <p className="auth-error-msg">{errors.email.message}</p>}
               </div>
             </div>

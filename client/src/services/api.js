@@ -290,6 +290,9 @@ export const settingsAPI = {
   updateSmtpSettings: (data) => api.put('/settings/smtp', data),
   // SMTP test timeout (25 seconds - backend fails at 20 seconds)
   testSmtpConnection: (data) => api.post('/settings/smtp/test', data, { timeout: 25000 }),
+  // Workspace invoice "From" details (for PDF) – view all; only admin can update
+  getWorkspaceInvoiceFrom: () => api.get('/settings/workspace-invoice-from'),
+  updateWorkspaceInvoiceFrom: (data) => api.put('/settings/workspace-invoice-from', data),
 };
 
 export default api;

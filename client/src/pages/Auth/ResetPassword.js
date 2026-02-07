@@ -151,43 +151,47 @@ const ResetPassword = () => {
           <form className="mt-4 space-y-3" onSubmit={handleSubmit(onSubmit)}>
             <div>
               <label htmlFor="newPassword" className="auth-label">New password <span className="text-red-500">*</span></label>
-              <div className="relative">
-                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
-                <input
-                  id="newPassword"
-                  type={showPassword ? 'text' : 'password'}
-                  {...register('newPassword', {
-                    required: 'Password is required',
-                    minLength: { value: 6, message: 'Password must be at least 6 characters' },
-                    maxLength: { value: 100, message: 'Password must not exceed 100 characters' },
-                  })}
-                  placeholder="Enter new password"
-                  className={`auth-input pl-9 pr-12 ${errors.newPassword ? 'auth-input-error' : ''}`}
-                />
-                <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-primary-600 hover:text-primary-700" aria-label={showPassword ? 'Hide password' : 'Show password'}>
-                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </button>
+              <div className="auth-input-wrap">
+                <div className="relative">
+                  <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
+                  <input
+                    id="newPassword"
+                    type={showPassword ? 'text' : 'password'}
+                    {...register('newPassword', {
+                      required: 'Password is required',
+                      minLength: { value: 6, message: 'Password must be at least 6 characters' },
+                      maxLength: { value: 100, message: 'Password must not exceed 100 characters' },
+                    })}
+                    placeholder="Enter new password"
+                    className={`auth-input pl-9 pr-12 ${errors.newPassword ? 'auth-input-error' : ''}`}
+                  />
+                  <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-primary-600 hover:text-primary-700" aria-label={showPassword ? 'Hide password' : 'Show password'}>
+                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
                 {errors.newPassword && <p className="auth-error-msg">{errors.newPassword.message}</p>}
               </div>
             </div>
 
             <div>
               <label htmlFor="confirmPassword" className="auth-label">Confirm password <span className="text-red-500">*</span></label>
-              <div className="relative">
-                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
-                <input
-                  id="confirmPassword"
-                  type={showConfirmPassword ? 'text' : 'password'}
-                  {...register('confirmPassword', {
-                    required: 'Please confirm your password',
-                    validate: (value) => value === password || 'Passwords do not match',
-                  })}
-                  placeholder="Confirm new password"
-                  className={`auth-input pl-9 pr-12 ${errors.confirmPassword ? 'auth-input-error' : ''}`}
-                />
-                <button type="button" onClick={() => setShowConfirmPassword(!showConfirmPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-primary-600 hover:text-primary-700" aria-label={showConfirmPassword ? 'Hide password' : 'Show password'}>
-                  {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </button>
+              <div className="auth-input-wrap">
+                <div className="relative">
+                  <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
+                  <input
+                    id="confirmPassword"
+                    type={showConfirmPassword ? 'text' : 'password'}
+                    {...register('confirmPassword', {
+                      required: 'Please confirm your password',
+                      validate: (value) => value === password || 'Passwords do not match',
+                    })}
+                    placeholder="Confirm new password"
+                    className={`auth-input pl-9 pr-12 ${errors.confirmPassword ? 'auth-input-error' : ''}`}
+                  />
+                  <button type="button" onClick={() => setShowConfirmPassword(!showConfirmPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-primary-600 hover:text-primary-700" aria-label={showConfirmPassword ? 'Hide password' : 'Show password'}>
+                    {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
                 {errors.confirmPassword && <p className="auth-error-msg">{errors.confirmPassword.message}</p>}
               </div>
             </div>
